@@ -409,3 +409,21 @@ describe('Gerçek site adaptörleri uçtan uca (kayıtlı sayfalarla; canlı ağ
     expect(Number(a)).toBeGreaterThan(0); failing = false;
   });
 });
+
+describe('Site hata davranışı', () => {
+  it('404 açıklayıcı mesaj verir; 508/429 kaynağın diğer yakın kontrollerini erteler (siteyi zorlamaz)', async () => {
+    const db = getPool();
+    const rows = (await db.query(`SELECT t.id, t.source_id FROM tracked_urls t WHERE t.active AND t.url LIKE '%straganof%' OR t.url LIKE '%kivircik%' OR t.url LIKE '%kusleme-sis%'`)).rows;
+    const am = (await db.query(`SELECT t.id, t.source_id FROM tracked_urls t JOIN sources s ON s.id=t.source_id WHERE s.domain='market.amasyaeturunleri.com.tr' LIMIT 1`)).rows[0];
+    expect(rows.length).toBeGreaterThan(0);
+    const mk = (status: number) => async (u: string) => ({ status, body: '', finalUrl: u, contentType: 'text/html' });
+    const r404 = await runCheck(db, am.id, { trigger: 'manual', fetcher: mk(404), skipRateWait: true });
+    expect(r404.status).toBe('error'); expect(r404.error).toMatch(/404.*bulunamadı/);
+    await db.query(`UPDATE tracked_urls SET next_check_at = now() WHERE source_id=$1 AND id<>$2`, [am.source_id, am.id]);
+    const r508 = await runCheck(db, am.id, { trigger: 'manual', fetcher: mk(508), skipRateWait: true });
+    expect(r508.error).toMatch(/508.*yavaşlatıldı/);
+    const sib = (await db.query(`SELECT count(*) n FROM tracked_urls WHERE source_id=$1 AND id<>$2 AND active AND next_check_at <= now() + interval '5 minutes'`, [am.source_id, am.id])).rows[0].n;
+    expect(sib).toBe('0'); // kardeş URL'ler ertelendi
+  });
+});
+
