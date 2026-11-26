@@ -12,7 +12,7 @@ export default function Login() {
   useEffect(() => { api('/setup/status').then((s: any) => setNeedsSetup(s.needsSetup)).catch(() => 0); }, []);
   return (
     <div className="login">
-      <h1 style={{ color: 'var(--brand)' }}>{t('app.name')}</h1>
+      <div style={{ marginBottom: 14 }}><span className="logo-plate"><img src="/ragyu-logo.png" alt="Ragyu Kasap+" width={200} height={38} /></span></div><h1 style={{ color: 'var(--ink)' }}>{t('app.name')}</h1>
       <div className="card">
         <h2>{t('login.title')}</h2>
         <Err msg={err} />

@@ -10,7 +10,7 @@ export default function Setup() {
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   return (
     <div className="login">
-      <h1 style={{ color: 'var(--brand)' }}>İlk yönetici kurulumu</h1>
+      <div style={{ marginBottom: 14 }}><span className="logo-plate"><img src="/ragyu-logo.png" alt="Ragyu Kasap+" width={200} height={38} /></span></div><h1 style={{ color: 'var(--ink)' }}>İlk yönetici kurulumu</h1>
       <div className="card">
         {st && !st.needsSetup && <div className="note">Kurulum tamamlanmış. <Link href="/login">Girişe dönün</Link>.</div>}
         {done && <div className="ok">Yönetici oluşturuldu. <Link href="/login">Giriş yapın</Link>.</div>}

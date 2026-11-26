@@ -6,7 +6,7 @@ import { Shell, useLoad, Err, Loading, FreshBadge } from '@/components/ui';
 import { ago } from '@/lib/format';
 
 const ORDER = ['cheapest', 'same', 'below_avg', 'avg', 'above_avg', 'most_expensive', 'none'];
-const COLOR: Record<string, string> = { cheapest: '#1a7f4b', same: '#1f5fa8', below_avg: '#0e9aa7', avg: '#c58a00', above_avg: '#e0651f', most_expensive: '#c62828', none: '#9a9090' };
+const COLOR: Record<string, string> = { cheapest: '#1a7f4b', same: '#5b6b8c', below_avg: '#0e9aa7', avg: '#c58a00', above_avg: '#e0651f', most_expensive: '#c62828', none: '#9a9090' };
 
 function Inner() {
   const { data: d, error, loading } = useLoad(() => api('/dashboard'), []);

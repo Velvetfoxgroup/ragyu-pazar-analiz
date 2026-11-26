@@ -40,7 +40,7 @@ export function Shell({ children, title, sub, actions }: { children: React.React
     <MeCtx.Provider value={me}>
       <div className="shell">
         <aside className="side">
-          <div className="brand">Ragyu<small>{t('app.short')}</small></div>
+          <div className="nav-logo"><span className="logo-plate"><img src="/ragyu-logo.png" alt="Ragyu Kasap+" width={150} height={29} /></span><small>{t('app.short')}</small></div>
           <nav className="nav">
             {!me.mustChangePassword && items.map(([h, k]) => <Link key={h} href={h} className={on(h) ? 'on' : ''}>{t(k)}</Link>)}
             {!me.mustChangePassword && admin.length > 0 && <div className="sec">{t('nav.admin')}</div>}
@@ -94,4 +94,4 @@ export function LineChart({ series, height = 180 }: { series: { name: string; co
     </div>
   );
 }
-export const COLORS = ['#7a1f2b', '#1f5fa8', '#1a7f4b', '#9a6700', '#6b3fa0', '#0e7490', '#b45309', '#475569'];
+export const COLORS = ['#141ed2', '#0b6e8a', '#1a7f4b', '#9a6700', '#6b3fa0', '#0e7490', '#b45309', '#475569'];
