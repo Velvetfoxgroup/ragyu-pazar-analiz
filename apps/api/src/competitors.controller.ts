@@ -4,7 +4,7 @@ import { parse as parseCsv } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
 import { z } from 'zod';
 import type { Pool } from 'pg';
-import { can, validateUrlSyntax, UrlBlockedError, findMismatches, similarity, parseQtyFromText, tx, listAdapters } from '@ragyu/core';
+import { can, validateUrlSyntax, UrlBlockedError, findMismatches, similarity, parseQtyFromText, tx, listAdapters, adapterKeyForHost } from '@ragyu/core';
 import { DB, Perm, CurrentUser, AuthUser, parse, httpErr, auditFrom, QueueService } from './infra';
 
 const unit = z.enum(['g', 'kg', 'ml', 'l', 'adet']);
@@ -70,7 +70,7 @@ export class CompetitorsController {
       const domain = hostOf(url);
       let src = (await c.query(`SELECT id FROM sources WHERE org_id=$1 AND lower(domain) IN ($2,$3)`, [u.orgId, domain, 'www.' + domain])).rows[0];
       let createdSource = false;
-      if (!src) { src = (await c.query(`INSERT INTO sources(org_id,name,domain,adapter_key) VALUES ($1,$2,$3,'generic-html') RETURNING id`, [u.orgId, domain, domain])).rows[0]; createdSource = true; }
+      if (!src) { src = (await c.query(`INSERT INTO sources(org_id,name,domain,adapter_key) VALUES ($1,$2,$3,$4) RETURNING id`, [u.orgId, domain, domain, adapterKeyForHost(domain)])).rows[0]; createdSource = true; }
       const attrs: any = {}; const q = b.expectedQty && b.expectedUnit ? { qty: b.expectedQty, unit: b.expectedUnit } : null;
       if (q) { attrs.pack_qty = String(q.qty); attrs.pack_unit = q.unit; }
       const title = b.title?.trim() || decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() ?? domain).replace(/[-_]+/g, ' ');
@@ -171,7 +171,7 @@ export class CompetitorsController {
         if (dupe.rowCount) { out.skipped.push({ row: rowNo, message: 'Bu URL bu ürün için zaten kayıtlı.' }); continue; }
         await tx(this.db, async (c) => {
           let src = (await c.query(`SELECT id FROM sources WHERE org_id=$1 AND lower(domain) IN ($2,$3)`, [u.orgId, domain, 'www.' + domain])).rows[0];
-          if (!src) { src = (await c.query(`INSERT INTO sources(org_id,name,domain,adapter_key) VALUES ($1,$2,$2,'generic-html') RETURNING id`, [u.orgId, domain])).rows[0]; out.sourcesCreated.push(domain); }
+          if (!src) { src = (await c.query(`INSERT INTO sources(org_id,name,domain,adapter_key) VALUES ($1,$2,$2,$3) RETURNING id`, [u.orgId, domain, adapterKeyForHost(domain)])).rows[0]; out.sourcesCreated.push(domain); }
           const title = (cTitle >= 0 && String(r[cTitle] ?? '').trim()) || decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() ?? domain).replace(/[-_]+/g, ' ');
           const cp = (await c.query(`INSERT INTO competitor_products(org_id,source_id,title,url,discovered_by) VALUES ($1,$2,$3,$4,'import') RETURNING id`, [u.orgId, src.id, title, url.toString()])).rows[0];
           await c.query(`INSERT INTO product_links(org_id,variant_id,competitor_product_id,status,origin,note,created_by) VALUES ($1,$2,$3,'review','manual','Toplu URL içe aktarma',$4)`, [u.orgId, v[0].id, cp.id, u.id]);
@@ -231,7 +231,7 @@ export class CompetitorsController {
         if (dupe.rowCount) { out.duplicates++; continue; }
         await tx(this.db, async (c) => {
           let src = (await c.query(`SELECT id FROM sources WHERE org_id=$1 AND lower(domain) IN ($2,$3)`, [u.orgId, domain, 'www.' + domain])).rows[0];
-          if (!src) { src = (await c.query(`INSERT INTO sources(org_id,name,domain,adapter_key) VALUES ($1,$2,$2,'generic-html') RETURNING id`, [u.orgId, domain])).rows[0]; out.sourcesCreated.push(domain); }
+          if (!src) { src = (await c.query(`INSERT INTO sources(org_id,name,domain,adapter_key) VALUES ($1,$2,$2,$3) RETURNING id`, [u.orgId, domain, adapterKeyForHost(domain)])).rows[0]; out.sourcesCreated.push(domain); }
           const cp = (await c.query(`INSERT INTO competitor_products(org_id,source_id,title,url,attrs,discovered_by) VALUES ($1,$2,$3,$4,$5,'import') RETURNING id`, [u.orgId, src.id, title, url.toString(), JSON.stringify(q ? { pack_qty: q.qty.toString(), pack_unit: q.unit } : {})])).rows[0];
           await c.query(`INSERT INTO product_links(org_id,variant_id,competitor_product_id,status,origin,score,mismatches,note,created_by) VALUES ($1,$2,$3,'suggested','auto',$4,$5,'Dış öneri dosyası (puan yeniden hesaplandı)',$6) ON CONFLICT DO NOTHING`, [u.orgId, v.id, cp.id, sim.score.toFixed(3), JSON.stringify(sim.mismatches), u.id]);
           await c.query(`INSERT INTO tracked_urls(org_id,source_id,competitor_product_id,url,origin,active,created_by) VALUES ($1,$2,$3,$4,'auto',false,$5)`, [u.orgId, src.id, cp.id, url.toString(), u.id]);
@@ -251,6 +251,21 @@ export class CompetitorsController {
       UPDATE tracked_urls x SET active=true, deactivated_at=NULL, next_check_at=now() + (t.rn * (SELECT min_interval_ms FROM s) || ' milliseconds')::interval FROM t WHERE x.id=t.id RETURNING x.id`, [id, u.orgId]);
     await auditFrom(this.db, u, 'source.urls_activated', 'source', id, { count: r.rowCount });
     return { activated: r.rowCount };
+  }
+
+  /** Genel adaptörle kalmış kaynaklara, alan adı bilinen site adaptörünü atar (yalnız adaptör anahtarı değişir; URL'ler pasif kalır). */
+  @Perm('source:manage') @Post('sources/assign-adapters')
+  async assignAdapters(@CurrentUser() u: AuthUser) {
+    const rows = (await this.db.query(`SELECT id, domain FROM sources WHERE org_id=$1 AND adapter_key='generic-html'`, [u.orgId])).rows;
+    const changed: { domain: string; adapter: string }[] = [];
+    for (const s of rows) {
+      const key = adapterKeyForHost(s.domain);
+      if (key === 'generic-html') continue;
+      await this.db.query(`UPDATE sources SET adapter_key=$3 WHERE id=$1 AND org_id=$2`, [s.id, u.orgId, key]);
+      changed.push({ domain: s.domain, adapter: key });
+    }
+    await auditFrom(this.db, u, 'source.adapters_assigned', 'source', undefined, { changed });
+    return { changed };
   }
 
   // ------------------------------------------------------------ gramaj düzeltmesi

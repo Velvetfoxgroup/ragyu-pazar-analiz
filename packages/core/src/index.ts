@@ -7,3 +7,4 @@ export * from './extract';
 export * from './scrape';
 export * from './queue';
 export * from './reports';
+export * from './adapters/sites';

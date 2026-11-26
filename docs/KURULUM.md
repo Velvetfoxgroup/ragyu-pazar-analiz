@@ -70,3 +70,28 @@ Yedek dosyaları kullanıcı bilgisi (şifre özeti) içerir: şifreli diske/eri
 3. **Öneriler (isteğe bağlı):** "Rakip ürün önerilerini içe aktar" (PriceRest product_suggestions). Dosyadaki puana güvenilmez, yeniden hesaplanır; zayıflar alınmaz; hepsi *önerildi*.
 4. **Adaptör doğrulama:** Şirket sunucusundan `npm run adapter:test -- <rakip ürün URL'si>` ile tek istekle ayrıştırmayı deneyin (veritabanına yazmaz). Fiyat bulunamazsa kaynak için `config.selectors` tanımlayın (Kaynaklar sayfası / API).
 5. **Etkinleştirme:** Kaynaklar → "N pasif URL'yi etkinleştir" (kaynak bazında; ilk kontroller kaynağın istek aralığıyla kademelendirilir). Eşleşmeleri onay yetkilisi Eşleşmeler sayfasından onaylar; onaysızlar kıyasa girmez.
+
+
+## 12. Rakip site adaptörleri (kayıtlı sayfalarla yazıldı, canlı site ile DOĞRULANMADI)
+
+Aşağıdaki siteler için özel adaptör vardır. Adaptörler yalnızca elle kaydedilmiş sayfa örnekleriyle (`tests/fixtures`) test edildi;
+geliştirme ortamından gerçek sitelere erişilemediği için **canlı sitede çalıştığı doğrulanmadı**.
+
+| Site | Adaptör anahtarı | Not |
+|---|---|---|
+| etineniyisi.com | `etineniyisi` | Gramaj sepet kutusundaki birim etiketinden ("400 gr"); etiket yoksa gramaj bilinmiyor sayılır |
+| nebyandogal.com | `nebyandogal` | Fiyat sayfada "100 g" için yazılır; adaptör bunu paket miktarı olarak okur |
+| organikasap.com | `organikasap` | Seçili varyantı sepet formundan okur; seçilemezse fiyat vermez |
+| tazedirekt.com, macrocenter.com.tr | `tazedirekt`, `macrocenter` | Fiyat yalnızca `og:price:amount` meta etiketinden (sayfa istemcide yüklendiği için); gramaj başlıktan |
+| migros.com.tr | `migros` | Kaydedilen sayfada fiyat yok → sunucu çıktısından fiyat alınamayabilir; kullanmayın |
+| fumeci.com | `fumeci` | IdeaSoft microdata; birim ana ürün miktar kutusundan (kg) |
+| dilekgurme.net | `dilekgurme` | KDV dahil fiyat (JSON-LD) |
+| market.amasyaeturunleri.com.tr | `amasya` | Gramaj ürün adından ("500g") |
+
+**Etkinleştirmeden önce (şirket sunucusunda):**
+
+1. `npm run adapter:test -- <ürün-URL'si> <adaptör-anahtarı>` ile her site için 1–2 gerçek sayfayı deneyin. Fiyat, gramaj ve stok
+   doğruysa devam edin; fiyat çıkmazsa komut hata koduyla biter ve hiçbir veri yazılmaz. `--dump` sayfayı dosyaya kaydeder.
+2. Kaynaklar sayfasında **Site adaptörlerini ata** düğmesi (veya URL içe aktarımı sırasında otomatik) kaynağa adaptörü bağlar.
+3. Ancak ondan sonra kaynağın pasif URL'lerini etkinleştirin (ilk kontroller kademeli başlar).
+4. Bir sitenin şablonu değişirse adaptör fiyatı bulamaz; sayfa "geçersiz" olur ve Kaynaklar'da hata olarak görünür — yanlış fiyat yazılmaz.

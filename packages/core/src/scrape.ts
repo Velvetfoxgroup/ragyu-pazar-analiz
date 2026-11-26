@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import { safeFetch, FetchResult, UrlBlockedError } from './ssrf';
 import { getAdapter, Extracted } from './extract';
+import './adapters/sites';
 import { toBase, unitPrice } from './units';
 import { findMismatches } from './matching';
 

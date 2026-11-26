@@ -28,8 +28,8 @@ export interface SourceAdapter {
   extract(html: string, cfg: ExtractConfig): Extracted;
 }
 
-const empty = (method: string): Extracted => ({ title: null, brand: null, listPrice: null, salePrice: null, currency: null, packQty: null, packUnit: null, inStock: null, campaign: null, shippingFee: null, multibuyMin: null, method });
-const txt = (s?: string | null) => (s ? s.replace(/\s+/g, ' ').trim() : null) || null;
+export const empty = (method: string): Extracted => ({ title: null, brand: null, listPrice: null, salePrice: null, currency: null, packQty: null, packUnit: null, inStock: null, campaign: null, shippingFee: null, multibuyMin: null, method });
+export const txt = (s?: string | null) => (s ? s.replace(/\s+/g, ' ').trim() : null) || null;
 
 function fromJsonLd($: cheerio.CheerioAPI): Partial<Extracted> | null {
   let found: any = null;
@@ -70,7 +70,7 @@ function fromSelectors($: cheerio.CheerioAPI, cfg: ExtractConfig): Partial<Extra
   return out;
 }
 
-function merge(method: string, ...parts: (Partial<Extracted> | null)[]): Extracted {
+export function merge(method: string, ...parts: (Partial<Extracted> | null)[]): Extracted {
   const out = empty(method);
   for (const p of parts) if (p) for (const [k, v] of Object.entries(p)) if (v !== null && v !== undefined && (out as any)[k] === null) (out as any)[k] = v;
   if (!out.packQty) {

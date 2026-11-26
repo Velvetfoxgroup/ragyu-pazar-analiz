@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import { safeFetch } from '../ssrf';
 import { getAdapter } from '../extract';
+import '../adapters/sites';
 
 async function main() {
   const [url, key = 'generic-html'] = process.argv.slice(2).filter((a) => !a.startsWith('--'));

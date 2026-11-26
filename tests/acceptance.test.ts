@@ -293,6 +293,13 @@ describe('Toplu rakip URL içe aktarma (PriceRest CSV)', () => {
     const rows = (await db.query(`SELECT l.status, t.active, s.domain FROM tracked_urls t JOIN product_links l ON l.competitor_product_id=t.competitor_product_id JOIN sources s ON s.id=t.source_id WHERE t.url LIKE '%ice-aktarilan%' OR t.url LIKE '%biftek-p-%'`)).rows;
     expect(rows).toHaveLength(3); expect(rows.every((x: any) => x.status === 'review' && x.active === false)).toBe(true);
     expect(rows.map((x: any) => x.domain).sort()).toEqual(['etineniyisi.com', 'macrocenter.com.tr', 'macrocenter.com.tr']);
+    // Alan adı bilinen kaynaklar otomatik olarak kendi adaptörüyle oluşur
+    const ad = (await db.query(`SELECT domain, adapter_key FROM sources WHERE domain IN ('etineniyisi.com','macrocenter.com.tr') ORDER BY domain`)).rows;
+    expect(ad.map((x: any) => x.adapter_key)).toEqual(['etineniyisi', 'macrocenter']);
+    // Genel adaptörde kalmış kaynağa toplu atama (yalnız yönetici)
+    await db.query(`UPDATE sources SET adapter_key='generic-html' WHERE domain='etineniyisi.com'`);
+    expect((await editor.post('/api/sources/assign-adapters').set(H)).status).toBe(403);
+    expect((await post(admin, '/api/sources/assign-adapters')).body.changed).toEqual([{ domain: 'etineniyisi.com', adapter: 'etineniyisi' }]);
     expect((await viewer.post('/api/catalog/import-urls').set(H).attach('file', Buffer.from(csv), 'u.csv')).status).toBe(403);
     expect((await editor.post('/api/sources/' + (await db.query(`SELECT id FROM sources WHERE domain='etineniyisi.com'`)).rows[0].id + '/activate-urls').set(H)).status).toBe(403);
     const sid = (await db.query(`SELECT id FROM sources WHERE domain='macrocenter.com.tr'`)).rows[0].id;
