@@ -4,6 +4,7 @@ Ragyu Kasap+ için şirket sunucusunda çalışan rakip fiyat ve pazar analiz uy
 Next.js (arayüz) · NestJS (API) · PostgreSQL · Redis/BullMQ (iş kuyruğu) · bağımsız veri toplama işçisi.
 
 - Kurulum (sunucu, HTTPS, ilk yönetici, çalışan hesabı, şifre sıfırlama, yedekleme): [docs/KURULUM.md](docs/KURULUM.md)
+- A'dan Z'ye adım adım kurulum: [docs/KURULUM-ADIM-ADIM.md](docs/KURULUM-ADIM-ADIM.md)
 - Gereksinimler, modül haritası, veri akışı, veri modeli, formüller, varsayımlar: [docs/MIMARI.md](docs/MIMARI.md)
 
 ## Hızlı başlangıç (yerel demo, Docker Compose)
