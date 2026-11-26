@@ -18,3 +18,7 @@ backups/
 
 # Marka logosu (küçültülmüş, web için) depoda tutulur
 !apps/web/public/ragyu-logo.png
+
+# Statik demo önizleme
+!docs/onizleme/
+!docs/onizleme/*.html
