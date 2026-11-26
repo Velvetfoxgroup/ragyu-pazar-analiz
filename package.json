@@ -2,7 +2,10 @@
   "name": "ragyu-pazar-analiz",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "build": "npm run build -w @ragyu/core && npm run build -w @ragyu/api && npm run build -w @ragyu/worker && npm run build -w @ragyu/web",
     "migrate": "tsx packages/core/src/cli/migrate.ts",
@@ -19,6 +22,11 @@
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^5.1.2"
+  },
+  "overrides": {
+    "multer": "^2.5.0",
+    "uuid": "^11.1.1",
+    "postcss": "^8.5.33"
   }
 }

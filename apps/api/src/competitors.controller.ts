@@ -38,7 +38,7 @@ export class CompetitorsController {
 
   @Perm('source:manage') @Post('sources')
   async createSource(@CurrentUser() u: AuthUser, @Body() body: unknown) {
-    const b = parse(z.object({ name: z.string().min(2).max(80), domain: z.string().min(3).max(120), adapterKey: z.string().default('generic-html'), config: z.record(z.any()).default({}), checkIntervalMinutes: z.number().int().min(5).max(10080).default(360), staleAfterHours: z.number().int().min(1).max(720).default(48), minIntervalMs: z.number().int().min(500).max(60000).default(2000) }), body);
+    const b = parse(z.object({ name: z.string().min(2).max(80), domain: z.string().min(3).max(120), adapterKey: z.string().default('generic-html'), config: z.record(z.string(), z.any()).default({}), checkIntervalMinutes: z.number().int().min(5).max(10080).default(360), staleAfterHours: z.number().int().min(1).max(720).default(48), minIntervalMs: z.number().int().min(500).max(60000).default(2000) }), body);
     const domain = b.domain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
     const r = await this.db.query(`INSERT INTO sources(org_id,name,domain,adapter_key,config,check_interval_minutes,stale_after_hours,min_interval_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
       ON CONFLICT (org_id, lower(domain)) DO NOTHING RETURNING id`, [u.orgId, b.name, domain, b.adapterKey, JSON.stringify(b.config), b.checkIntervalMinutes, b.staleAfterHours, b.minIntervalMs]);
@@ -49,7 +49,7 @@ export class CompetitorsController {
 
   @Perm('source:manage') @Patch('sources/:id')
   async updateSource(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() body: unknown) {
-    const b = parse(z.object({ name: z.string().optional(), adapterKey: z.string().optional(), config: z.record(z.any()).optional(), active: z.boolean().optional(), checkIntervalMinutes: z.number().int().min(5).optional(), staleAfterHours: z.number().int().min(1).optional(), minIntervalMs: z.number().int().min(500).optional() }), body);
+    const b = parse(z.object({ name: z.string().optional(), adapterKey: z.string().optional(), config: z.record(z.string(), z.any()).optional(), active: z.boolean().optional(), checkIntervalMinutes: z.number().int().min(5).optional(), staleAfterHours: z.number().int().min(1).optional(), minIntervalMs: z.number().int().min(500).optional() }), body);
     const r = await this.db.query(`UPDATE sources SET name=COALESCE($3,name), adapter_key=COALESCE($4,adapter_key), config=COALESCE($5::jsonb,config), active=COALESCE($6,active), check_interval_minutes=COALESCE($7,check_interval_minutes), stale_after_hours=COALESCE($8,stale_after_hours), min_interval_ms=COALESCE($9,min_interval_ms) WHERE id=$1 AND org_id=$2 RETURNING id`,
       [id, u.orgId, b.name ?? null, b.adapterKey ?? null, b.config ? JSON.stringify(b.config) : null, b.active ?? null, b.checkIntervalMinutes ?? null, b.staleAfterHours ?? null, b.minIntervalMs ?? null]);
     if (!r.rowCount) throw httpErr(404, 'Kaynak bulunamadı.', 'not_found');
@@ -89,7 +89,7 @@ export class CompetitorsController {
 
   @Perm('url:write') @Patch('urls/:id')
   async updateUrl(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() body: unknown) {
-    const b = parse(z.object({ url: z.string().max(2000).optional(), active: z.boolean().optional(), extraction: z.record(z.any()).optional() }), body);
+    const b = parse(z.object({ url: z.string().max(2000).optional(), active: z.boolean().optional(), extraction: z.record(z.string(), z.any()).optional() }), body);
     const t = (await this.db.query('SELECT * FROM tracked_urls WHERE id=$1 AND org_id=$2', [id, u.orgId])).rows[0];
     if (!t) throw httpErr(404, 'URL bulunamadı.', 'not_found');
     let newId: string | null = null;
