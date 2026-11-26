@@ -15,3 +15,6 @@ backups/
 *.bak
 .github/workflows/
 *.html
+
+# Marka logosu (küçültülmüş, web için) depoda tutulur
+!apps/web/public/ragyu-logo.png
