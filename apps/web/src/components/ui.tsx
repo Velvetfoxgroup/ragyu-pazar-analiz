@@ -1,5 +1,5 @@
 'use client';
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
@@ -13,9 +13,11 @@ export const can = (me: Me, p: string) => me.permissions.includes(p);
 export function useLoad<T>(fn: () => Promise<T>, deps: any[]) {
   const [data, setData] = useState<T | null>(null); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const seq = useRef(0);
   const reload = useCallback(() => {
+    const mine = ++seq.current; // eski isteğin geç gelen yanıtı yeni sonucu ezmesin
     setLoading(true);
-    fn().then((d) => { setData(d); setError(null); }).catch((e) => { if (e instanceof ApiError && e.status === 401) router.push('/login'); else setError(e.message); }).finally(() => setLoading(false));
+    fn().then((d) => { if (mine === seq.current) { setData(d); setError(null); } }).catch((e) => { if (mine !== seq.current) return; if (e instanceof ApiError && e.status === 401) router.push('/login'); else setError(e.message); }).finally(() => { if (mine === seq.current) setLoading(false); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   useEffect(reload, [reload]);

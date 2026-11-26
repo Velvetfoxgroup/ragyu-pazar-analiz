@@ -11,6 +11,7 @@
     "migrate": "tsx packages/core/src/cli/migrate.ts",
     "adapter:test": "tsx packages/core/src/cli/adapter-test.ts",
     "seed:demo": "tsx apps/sample-site/seed.ts",
+    "demo:temizle": "tsx packages/core/src/cli/demo-temizle.ts",
     "admin:create": "tsx packages/core/src/cli/create-admin.ts",
     "dev:api": "tsx watch apps/api/src/main.ts",
     "dev:worker": "tsx watch apps/worker/src/main.ts",

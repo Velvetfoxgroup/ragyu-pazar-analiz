@@ -72,6 +72,15 @@ Windows: `.\deploy\demo.ps1` (`.env`'i rastgele parolalarla üretir; adres http:
 5. **Etkinleştirme:** Kaynaklar → "N pasif URL'yi etkinleştir" (kaynak bazında; ilk kontroller kaynağın istek aralığıyla kademelendirilir). Eşleşmeleri onay yetkilisi Eşleşmeler sayfasından onaylar; onaysızlar kıyasa girmez.
 
 
+**Demo verisini gerçek veriden ayırma.** Demo kurulumu aynı katalogla birlikte 3 sahte rakip kaynağı ("… (demo)") yükler. Gerçek verilere geçmeden önce:
+```
+docker compose exec api node_modules/.bin/tsx packages/core/src/cli/demo-temizle.ts            # ne silineceğini sayar
+docker compose exec api node_modules/.bin/tsx packages/core/src/cli/demo-temizle.ts --onayla   # siler
+```
+Yalnızca demo kaynakları ve onlara bağlı rakip ürün/URL/gözlem/uyarı silinir; katalog, kullanıcılar ve gerçek kaynaklar kalır (Docker dışında: `npm run demo:temizle [-- --onayla]`). Geri alınamaz; gerçek kurulumda önce yedek alın.
+
+**Rakip URL CSV'sini yükleme:** İçe / dışa aktar → "Rakip URL'lerini toplu içe aktar" → PriceRest "Tüm Satıcı URL'leri" CSV'si (sütunlar `Product Code` ve `Seller URL`; diğer sütunlar yok sayılır). 363 satırlık dosyada 95 satır Ragyu'nun kendi sitesidir (atlanır), 268 rakip URL'si eklenir ve 9 kaynak kendi adaptörüyle otomatik oluşur. URL'ler *pasif*, eşleşmeler *inceleme bekliyor* açılır; kaynak kaynak etkinleştirin (bölüm 12).
+
 ## 12. Rakip site adaptörleri (kayıtlı sayfalarla yazıldı, canlı site ile DOĞRULANMADI)
 
 Aşağıdaki siteler için özel adaptör vardır. Adaptörler yalnızca elle kaydedilmiş sayfa örnekleriyle (`tests/fixtures`) test edildi;

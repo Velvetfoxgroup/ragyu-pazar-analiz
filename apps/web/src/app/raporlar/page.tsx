@@ -11,8 +11,9 @@ function Inner() {
   const cats = useLoad(() => api<string[]>('/categories'), []); const src = useLoad(() => api<any>('/sources'), []);
   const f: Record<string, any> = { category, q, stock, includeShipping: ship ? '1' : '', priceBasis: basis === 'list' ? 'list' : '', sellerSourceId: seller, from: from ? new Date(from).toISOString() : '', to: to ? new Date(to + 'T23:59:59').toISOString() : '' };
   const sales = tab === 'sales'; const needSeller = tab === 'seller' && !seller;
-  const { data, error, loading } = useLoad(() => (sales ? api('/reports/sales-performance') : needSeller ? Promise.resolve(null) : api(`/reports/${tab}`, { query: f })), [tab, JSON.stringify(f)]);
-  const d: any = data;
+  // Yanıt hangi sekme için alındıysa onunla etiketlenir: sekme değişince önceki sekmenin verisi yeni sekmenin tablosuna verilmez.
+  const { data, error, loading } = useLoad(async () => ({ tab, payload: sales ? await api('/reports/sales-performance') : needSeller ? null : await api(`/reports/${tab}`, { query: f }) }), [tab, JSON.stringify(f)]);
+  const d: any = data && (data as any).tab === tab ? (data as any).payload : null;
   return <>
     <Tabs value={tab} onChange={setTab} tabs={[['comparison', t('reports.comparison')], ['cheapest', t('reports.cheapest')], ['seller', t('reports.seller')], ['summary', t('reports.summary')], ['weekly', t('reports.weekly')], ['sales', t('reports.sales')]]} />
     {!sales && <div className="card"><div className="row">
@@ -24,7 +25,7 @@ function Inner() {
       <div><label>Fiyat esası</label><select value={basis} onChange={(e) => setBasis(e.target.value)}><option value="sale">İndirimli (satış) fiyatı</option><option value="list">Liste fiyatı</option></select></div>
       <label style={{ display: 'flex', gap: 6, alignItems: 'center', margin: 0 }}><input type="checkbox" checked={ship} onChange={(e) => setShip(e.target.checked)} /> Kargo dahil</label>
       <a className="btn" style={{ marginLeft: 'auto' }} href={downloadUrl(`/reports/${tab}`, { ...f, format: 'xlsx' })}>{t('common.excel')}</a></div></div>}
-    <Err msg={error} /><Loading on={loading} />
+    <Err msg={error} /><Loading on={loading || !(data && (data as any).tab === tab)} />
     {needSeller && <div className="note">Kıyaslamak için bir satıcı seçin.</div>}
     {d && !sales && d.meta && <div className="note" style={{ fontSize: 13 }}><b>Hesap kuralı:</b> {d.meta.formula} · Fiyat esası: <b>{d.meta.priceBasis}</b> · Kargo: <b>{d.meta.shippingIncluded ? 'dahil (bilinen kargo ücretleri eklendi)' : 'hariç'}</b> · Geçerlilik anı: {dt(d.meta.asOf)}</div>}
     {sales && d && <div className="warnbox"><b>Satış verisi yok.</b> {d.message}</div>}
