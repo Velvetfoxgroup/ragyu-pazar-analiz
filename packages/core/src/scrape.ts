@@ -79,7 +79,7 @@ export async function runCheck(db: Pool, trackedUrlId: string, opts: CheckOption
   }
   if (res.status < 200 || res.status >= 300) {
     const hint = res.status === 404 || res.status === 410 ? ' Sayfa bulunamadı: ürün kaldırılmış veya URL değişmiş olabilir; adresi tarayıcıda kontrol edin, gerekirse URL’yi düzenleyin.'
-      : [429, 503, 508, 509].includes(res.status) ? ' Site aşırı yük/istek sınırı bildiriyor olabilir (geçici); kaynak yavaşlatıldı, daha sonra yeniden denenecek.' : '';
+      : [429, 503, 508, 509].includes(res.status) ? ' Site hatası (siteden geliyor, geçici olabilir; sayfa tarayıcıda da hata veriyorsa sorun sitededir). Otomatik olarak daha sonra yeniden denenecek; kaynak yavaşlatıldı.' : '';
     if ([429, 503, 508, 509].includes(res.status)) {
       // Siteyi zorlamamak için: aynı kaynağın yakın vadeli diğer kontrolleri 10 dk ertelenir.
       await db.query(`UPDATE tracked_urls SET next_check_at = now() + interval '10 minutes' WHERE source_id=$1 AND id<>$2 AND active AND next_check_at < now() + interval '10 minutes'`, [t.source_id, t.id]);

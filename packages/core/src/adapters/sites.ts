@@ -38,22 +38,48 @@ const isType = (n: any, t: string) => n && (n['@type'] === t || (Array.isArray(n
 const firstOffer = (n: any) => (Array.isArray(n?.offers) ? n.offers[0] : n?.offers);
 
 // ───────────────────────── Etin En İyisi (Ticimax) ─────────────────────────
-/** Ticimax: JSON-LD Product (KDV dahil satış fiyatı); gramaj sepet kutusundaki satış birimi etiketinde ("400 gr"). */
+/**
+ * Ticimax ürün sayfası. Fiyat sırayla: JSON-LD Product → sayfaya gömülü ürün verisi (satisFiyatiStr) → ekrandaki fiyat kutusu.
+ * Gramaj: sepet kutusundaki satış birimi etiketi ("400 gr") veya gömülü salesUnit. Ürün yoksa Ticimax adresi arama sayfasına
+ * yönlendirebilir: arama sonucu TAM BİR ürün içeriyorsa o kart okunur (yöntem adı "arama-tek-sonuc"), birden fazlaysa fiyat verilmez.
+ */
 export const etinEnIyisiAdapter: SourceAdapter = {
   key: 'etineniyisi', label: 'Etin En İyisi (Ticimax)',
   extract(html) {
     const $ = cheerio.load(html);
+    const scripts = $('script').toArray().map((e) => $(e).html() ?? '').join('\n');
+    const embedded = (k: string) => scripts.match(new RegExp(`"${k}":"([^"]*)"`))?.[1];
     const p = jsonLdNodes($).find((n) => isType(n, 'Product'));
-    if (!p) return empty('etineniyisi');
     const offer = firstOffer(p);
-    // Ticimax sayfasındaki gömülü ürün verisi: piyasa fiyatı (liste) ve indirimli fiyat.
-    const market = dec($('script').toArray().map((e) => $(e).html() ?? '').join('\n').match(/"piyasaFiyatiStr":"([^"]*)"/)?.[1]);
-    const sale = dec(offer?.price, true);
-    const list = market && sale && new Decimal(market).gt(sale) ? market : null;
-    const unit = txt($('.pSatisBirimi').first().text());
-    return merge('etineniyisi:json-ld', {
-      title: txt(p.name), brand: txt(p.brand?.name), salePrice: sale, listPrice: list, currency: offer?.priceCurrency ?? 'TRY',
-      inStock: stockFromSchema(offer?.availability),
+    let method = 'etineniyisi:json-ld';
+    let title = txt(p?.name); let brand = txt(p?.brand?.name);
+    let sale = dec(offer?.price, true); let avail: boolean | null = offer?.availability ? stockFromSchema(offer.availability) : null;
+    let unit = txt($('.pSatisBirimi').first().text()) ?? embedded('salesUnit') ?? null;
+    if (!sale && (p || $('#divFiyatAlanlari, .urunDetayFiyatContainer').length)) {
+      sale = dec(embedded('satisFiyatiStr')) ?? dec($('#divFiyatAlanlari .indirimliFiyat .spanFiyat, #divIndirimsizFiyat .spanFiyat, .PriceList .spanFiyat').first().text());
+      if (sale) method = 'etineniyisi:sayfa-fiyati';
+      title = title ?? txt($('h1').first().text()) ?? txt(embedded('urunAdi'));
+      brand = brand ?? txt(embedded('brandName'));
+    }
+    if (!sale) { // arama/listeleme sayfası: tek ürün varsa o
+      const items = $('#ProductPageProductList .productItem');
+      if (items.length === 1) {
+        const it = items.first();
+        sale = dec(it.find('.discountPriceSpan').first().text());
+        if (sale) {
+          method = 'etineniyisi:arama-tek-sonuc';
+          title = txt(it.find('.productName a').first().text()) ?? txt(it.find('a.detailLink').first().attr('title'));
+          brand = txt(it.find('.productMarka').first().text());
+          unit = txt(it.find('.productSatisBirimi span').first().text());
+          avail = it.find('.btnAddToCart').length > 0 ? true : null;
+        }
+      }
+    }
+    if (!sale) return empty('etineniyisi');
+    const list = dec(embedded('piyasaFiyatiStr'));
+    return merge(method, {
+      title, brand, salePrice: sale, listPrice: list && new Decimal(list).gt(sale) ? list : null, currency: offer?.priceCurrency ?? 'TRY',
+      inStock: avail,
     }, qtyPart(unit));
   },
 };

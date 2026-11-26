@@ -16,3 +16,4 @@ dosyayı yenileyin. Uzantı `.htm`'dir çünkü `.gitignore` `*.html` dosyaları
 | fumeci-*.htm | fumeci.com (IdeaSoft) | 1.600 TL/kg, 2.700 TL/kg |
 | dilekgurme.htm | dilekgurme.net | 2.200 TL (KDV dahil) / 1 kg |
 | amasya.htm | market.amasyaeturunleri.com.tr (WooCommerce) | 649 TL / 500 g |
+| etineniyisi-arama.htm | etineniyisi.com arama sonucu (tek ürün kartı) | 310 TL / 250 g (yedek yol) |

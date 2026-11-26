@@ -107,3 +107,23 @@ describe('site adaptörleri (kayıtlı sayfa örnekleri)', () => {
     expect(adapterKeyForHost('baska-site.com')).toBe('generic-html');
   });
 });
+
+describe('etineniyisi (Ticimax) yedek yollar', () => {
+  it('arama sayfasına yönlenmiş tek sonuç: 310 TL / 250 gr okunur ve yöntem belirtilir', () => {
+    const e = run('etineniyisi', 'etineniyisi-arama');
+    expect(e.method).toBe('etineniyisi:arama-tek-sonuc');
+    expect(e.title).toBe('Kuzu Kuyruk Yağı'); expect(e.salePrice).toBe('310'); expect(e.packQty).toBe('250'); expect(e.packUnit).toBe('g'); expect(e.inStock).toBe(true);
+    expect(perKg(e)).toBe('1240.00');
+  });
+  it('arama sayfasında birden fazla ürün varsa fiyat verilmez (yanlış ürün riski)', () => {
+    const one = load('etineniyisi-arama');
+    const card = one.match(/<div class="ItemOrj[\s\S]*?<\/div>\s*<\/div>\s*<\/div>\s*<\/div>/)![0];
+    const two = one.replace(card, card + card);
+    expect(getAdapter('etineniyisi').extract(two, {}).salePrice).toBeNull();
+  });
+  it('JSON-LD yoksa ürün sayfasındaki fiyat kutusundan okunur', () => {
+    const html = load('etineniyisi').replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/, '');
+    const e = getAdapter('etineniyisi').extract(html, {});
+    expect(e.salePrice).toBe('1105'); expect(e.packQty).toBe('400'); expect(e.method).toBe('etineniyisi:sayfa-fiyati');
+  });
+});
