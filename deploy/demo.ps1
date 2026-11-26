@@ -2,6 +2,7 @@
 # .env yoksa rastgele parolalarla bu bilgisayarda üretilir (.env depoya eklenmez, .gitignore'dadır).
 #   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 #   .\deploy\demo.ps1
+param([switch]$VeriYukle)  # örnek veriyi zorla yeniden yükler (mevcut verilerin üzerine yazabilir)
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
@@ -37,6 +38,8 @@ if (Test-Path .env) {
   Write-Host ".env oluşturuldu (rastgele parolalar)." -ForegroundColor Green
 }
 
+# Veritabanı birimi daha önce varsa bu bir YENİDEN BAŞLATMADIR: mevcut veriler korunur, örnek veri tekrar yüklenmez.
+$ilk = -not ((docker volume ls -q) -contains 'ragyu-pazar_pgdata')
 docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
 if ($LASTEXITCODE -ne 0) { throw "docker compose başarısız oldu; çıktıyı kontrol edin." }
 
@@ -46,7 +49,8 @@ for ($i = 0; $i -lt 60; $i++) {
   if ($st -match 'healthy') { break }
   Start-Sleep -Seconds 3
 }
-docker compose exec api node_modules/.bin/tsx apps/sample-site/seed.ts
+if ($ilk -or $VeriYukle) { docker compose exec api node_modules/.bin/tsx apps/sample-site/seed.ts }
+else { Write-Host 'Mevcut veritabanı bulundu; örnek veri yeniden yüklenmedi, verileriniz korundu.' -ForegroundColor Yellow }
 
 $token = (Get-Content .env | Where-Object { $_ -like 'SETUP_TOKEN=*' }) -replace '^SETUP_TOKEN=', ''
 Write-Host ""
