@@ -4,6 +4,8 @@
 x-demo-env: &demo-env
   SCRAPER_ALLOW_HOSTS: "ornek-et.demo,demo-kasap.demo,lezzet.demo,ornek-et.demo:4100,demo-kasap.demo:4100,lezzet.demo:4100"
 services:
+  # Demo yalnızca bu bilgisayardan açılır: http://localhost:8080 (80/443 yayınlanmaz). Gerekir: Docker Compose 2.24+
+  proxy: { ports: !override ["127.0.0.1:8080:80"] }
   api: { environment: *demo-env }
   worker: { environment: { <<: *demo-env, AUTO_MIGRATE: "false" } }
   sample-site:

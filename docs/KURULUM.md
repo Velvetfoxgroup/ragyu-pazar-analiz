@@ -62,7 +62,7 @@ Yedek dosyaları kullanıcı bilgisi (şifre özeti) içerir: şifreli diske/eri
 - Kaynak başına hız sınırı (`min_interval_ms`), zaman aşımı (10 sn), yanıt boyutu (2 MB), en çok 3 yönlendirme; yerel/dahili adresler ve bunlara yönlendirmeler engellenir.
 
 ## 10. Demo
-`docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build` ardından `docker compose exec api node_modules/.bin/tsx apps/sample-site/seed.ts`. Demo, yerel sahte rakip sitelerini tarar; geçmiş fiyat gözlemleri örnek amaçlı üretilmiştir (`raw.method = demo-backfill`). Gerçek rakip sitelerde doğrulama yapılmamıştır.
+Windows: `.\deploy\demo.ps1` (`.env`'i rastgele parolalarla üretir; adres http://localhost:8080). Elle: `.env` hazırlayıp (README) `docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build` ardından `docker compose exec api node_modules/.bin/tsx apps/sample-site/seed.ts`. Demo, yerel sahte rakip sitelerini tarar; geçmiş fiyat gözlemleri örnek amaçlı üretilmiştir (`raw.method = demo-backfill`). Gerçek rakip sitelerde doğrulama yapılmamıştır.
 
 ## 11. Gerçek katalog ve rakip URL'lerini yükleme (önerilen sıra)
 1. **Katalog:** İçe aktar → `data/ragyu-katalog.csv` (PriceRest raporlarından: gerçek ürün kodları aynen, Ragyu paket fiyatı). Gramaj kaynağı sütunu (`gramaj_kaynagi`): ürün adında yazıyorsa o; yoksa Ragyu paket fiyatı ÷ kg fiyatı oranından **türetilmiştir** (16 satır "standart dışı, doğrulayın" etiketli, 3 satır gramajsız → `adet`, kg kıyasına girmez). Türetilmiş gramajları ürün sorumlusuna doğrulatın.
