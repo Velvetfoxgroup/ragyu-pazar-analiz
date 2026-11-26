@@ -11,8 +11,8 @@ import { parseFilters } from './reports.controller';
 
 const unit = z.enum(['g', 'kg', 'ml', 'l', 'adet']);
 const attrs = z.object({ species: z.string().optional(), cut: z.string().optional(), processing: z.string().optional(), bone: z.enum(['kemikli', 'kemiksiz']).optional(), state: z.enum(['taze', 'donuk']).optional() }).partial();
-const variantIn = z.object({ sku: z.string().min(1).max(60), packQty: z.coerce.number().positive(), packUnit: unit, price: z.coerce.number().nonnegative().nullable().optional(), barcode: z.string().max(40).nullable().optional() });
-const productIn = z.object({ code: z.string().min(1).max(60), name: z.string().min(1).max(200), category: z.string().max(80).nullable().optional(), subcategory: z.string().max(80).nullable().optional(), brand: z.string().max(80).nullable().optional(), imageUrl: z.string().url().nullable().optional().or(z.literal('')), active: z.boolean().default(true), attrs: attrs.optional(), variants: z.array(variantIn).min(1) });
+const variantIn = z.object({ sku: z.string().trim().min(1).max(60), packQty: z.coerce.number().positive(), packUnit: unit, price: z.coerce.number().nonnegative().nullable().optional(), barcode: z.string().max(40).nullable().optional() });
+const productIn = z.object({ code: z.string().trim().min(1).max(60), name: z.string().trim().min(1).max(200), category: z.string().max(80).nullable().optional(), subcategory: z.string().max(80).nullable().optional(), brand: z.string().max(80).nullable().optional(), imageUrl: z.string().url().nullable().optional().or(z.literal('')), active: z.boolean().default(true), attrs: attrs.optional(), variants: z.array(variantIn).min(1) });
 
 export async function setOwnPrice(db: any, orgId: string, variantId: string, price: Decimal.Value | null) {
   if (price === null) return;

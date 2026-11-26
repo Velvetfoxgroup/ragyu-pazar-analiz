@@ -13,21 +13,21 @@ export async function seedDemo(opts: { runChecks?: boolean; port?: number; csv?:
   let org = (await db.query('SELECT id FROM organizations ORDER BY created_at LIMIT 1')).rows[0];
   if (!org) org = (await db.query(`INSERT INTO organizations(name,slug) VALUES ('Ragyu Kasap+','ragyu') RETURNING id`)).rows[0];
   const orgId: string = org.id;
-  const csv = opts.csv ?? path.resolve(__dirname, '../../data/ornek-katalog.csv');
-  const lines = fs.readFileSync(csv, 'utf8').trim().split('\n').slice(1).map((l) => l.split(';'));
+  // Ragyu kataloğu: PriceRest raporlarındaki GERÇEK ürün kodları aynen kullanılır (kod = SKU). Gramaj: ürün adından / Ragyu paket fiyatından türetilmiştir (data/ragyu-katalog.csv > gramaj_kaynagi).
+  const katalog = fs.readFileSync(path.resolve(__dirname, '../../data/ragyu-katalog.csv'), 'utf8').trim().split('\n').slice(1).map((l) => l.split(';'));
   const variantBySku = new Map<string, string>();
-  let i = 0;
-  for (const [sku, name, brand, price] of lines) {
-    const a = extractAttrs(name);
-    const category = a.processing && ['sucuk', 'salam', 'sosis', 'pastırma', 'füme', 'kavurma'].includes(a.processing) ? 'Şarküteri' : /köfte|kıyma/i.test(name) ? 'Kıyma & Köfte' : a.species === 'kuzu' || /kuzu/i.test(name) ? 'Kuzu' : /wagyu/i.test(name) ? 'Wagyu' : 'Dana';
-    const p = (await db.query(`INSERT INTO products(org_id,code,name,category,brand,attrs,source) VALUES ($1,$2,$3,$4,$5,$6,'demo') ON CONFLICT (org_id, lower(code)) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [orgId, sku, name.trim(), category, brand, JSON.stringify({ species: a.species, cut: a.cut, processing: a.processing, bone: a.bone, state: a.state })])).rows[0];
-    // Excel'de gramaj sütunu yok: demo varsayımı — ilk 30 ürün 500 g paket (fiyat/2), diğerleri 1 kg.
-    const half = i < 30; const P = Number(price) || 0;
-    const v = (await db.query(`INSERT INTO product_variants(org_id,product_id,sku,pack_qty,pack_unit,price,source) VALUES ($1,$2,$3,$4,$5,$6,'demo') ON CONFLICT (org_id, lower(sku)) DO UPDATE SET price=EXCLUDED.price RETURNING id`,
-      [orgId, p.id, sku, half ? 500 : 1, half ? 'g' : 'kg', P > 0 ? new Decimal(P).div(half ? 2 : 1).toString() : null])).rows[0];
-    if (P > 0) await db.query(`INSERT INTO own_price_history(org_id,variant_id,price,valid_from) SELECT $1,$2,$3, now() - interval '30 days' WHERE NOT EXISTS (SELECT 1 FROM own_price_history WHERE variant_id=$2)`, [orgId, v.id, new Decimal(P).div(half ? 2 : 1).toString()]);
-    variantBySku.set(sku, v.id); i++;
+  for (const [kod, ad, marka, , sku, qty, unit, fiyat] of katalog) {
+    const a = extractAttrs(ad);
+    const lc = ad.toLocaleLowerCase('tr-TR');
+    const category = /sucuk|salam|sosis|pastırma|füme|kavurma|kuru et/.test(lc) ? 'Şarküteri' : /köfte|kıyma|burger/.test(lc) ? 'Kıyma & Köfte' : /wagyu/.test(lc) ? 'Wagyu' : /kuzu/.test(lc) ? 'Kuzu' : /peynir|reçel|hardal|ajvar|lazanya|kaserei|easy mix/.test(lc) ? 'Delikatesen' : 'Dana';
+    const p = (await db.query(`INSERT INTO products(org_id,code,name,category,brand,attrs,source) VALUES ($1,$2,$3,$4,$5,$6,'import') ON CONFLICT (org_id, lower(code)) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [orgId, kod.trim(), ad.trim(), category, marka, JSON.stringify({ species: a.species, cut: a.cut, processing: a.processing, bone: a.bone, state: a.state })])).rows[0];
+    const v = (await db.query(`INSERT INTO product_variants(org_id,product_id,sku,pack_qty,pack_unit,price,source) VALUES ($1,$2,$3,$4,$5,$6,'import') ON CONFLICT (org_id, lower(sku)) DO UPDATE SET price=EXCLUDED.price, pack_qty=EXCLUDED.pack_qty, pack_unit=EXCLUDED.pack_unit RETURNING id`,
+      [orgId, p.id, sku.trim(), qty, unit, fiyat ? fiyat : null])).rows[0];
+    if (fiyat) await db.query(`INSERT INTO own_price_history(org_id,variant_id,price,valid_from) SELECT $1,$2,$3, now() - interval '30 days' WHERE NOT EXISTS (SELECT 1 FROM own_price_history WHERE variant_id=$2)`, [orgId, v.id, fiyat]);
+    variantBySku.set(sku.trim(), v.id);
   }
+  const csv = opts.csv ?? path.resolve(__dirname, '../../data/ornek-katalog.csv');
+  const lines = katalog;
   const cat = demoCatalog(csv);
   const trackedIds: string[] = [];
   for (const [host, cfg] of Object.entries(SITES)) {

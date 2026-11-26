@@ -1,10 +1,15 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { parse as parseCsv } from 'csv-parse/sync';
+import ExcelJS from 'exceljs';
 import { z } from 'zod';
 import type { Pool } from 'pg';
 import { can, validateUrlSyntax, UrlBlockedError, findMismatches, similarity, parseQtyFromText, tx, listAdapters } from '@ragyu/core';
 import { DB, Perm, CurrentUser, AuthUser, parse, httpErr, auditFrom, QueueService } from './infra';
 
 const unit = z.enum(['g', 'kg', 'ml', 'l', 'adet']);
+/** URL tekilleştirme: www., sondaki eğik çizgi ve büyük/küçük harf farkı yok sayılır. */
+const NORM_URL = (col: string) => `lower(regexp_replace(regexp_replace(${col}, '^(https?://)www\\.', '\\1'), '/+$', ''))`;
 const hostOf = (u: URL) => u.hostname.toLowerCase().replace(/^www\./, '');
 
 function checkUrl(raw: string): URL {
@@ -20,6 +25,7 @@ export class CompetitorsController {
   async sources(@CurrentUser() u: AuthUser) {
     const r = await this.db.query(
       `SELECT s.*, (SELECT count(*)::int FROM tracked_urls t WHERE t.source_id=s.id AND t.active) AS active_urls,
+              (SELECT count(*)::int FROM tracked_urls t WHERE t.source_id=s.id AND NOT t.active) AS inactive_urls,
               (SELECT count(*)::int FROM tracked_urls t WHERE t.source_id=s.id AND t.active AND t.last_status='error') AS failing_urls,
               (SELECT count(*)::int FROM competitor_products c WHERE c.source_id=s.id) AS product_count
          FROM sources s WHERE s.org_id=$1 ORDER BY lower(s.name)`, [u.orgId]);
@@ -127,6 +133,124 @@ export class CompetitorsController {
     // Aynı rakip ürünün tüm URL'lerinden gelen gözlemler: URL değişse de geçmiş görünür.
     const obs = (await this.db.query(`SELECT o.id, o.observed_at, o.url, o.tracked_url_id, o.scrape_run_id, o.sale_price, o.list_price, o.unit_price, o.pack_qty, o.pack_unit, o.qty_source, o.in_stock, o.quality, o.quality_reasons FROM price_observations o WHERE o.competitor_product_id=$1 ORDER BY o.observed_at DESC LIMIT 200`, [t.competitor_product_id])).rows;
     return { url: t, runs, observations: obs };
+  }
+
+
+  /**
+   * Toplu rakip URL içe aktarma (ör. PriceRest "Tüm Satıcı URL'leri" CSV). Sütunlar: Product Code / Seller URL (+ isteğe bağlı Seller Name, Title).
+   * Kayıtlar "inceleme bekliyor" eşleşmesi olarak açılır (onaylı DEĞİL). URL'ler varsayılan olarak pasif eklenir;
+   * kaynak adaptörü doğrulanınca kaynak bazında topluca etkinleştirilir. Ragyu'nun kendi sitesi (OWN_DOMAINS) atlanır.
+   */
+  @Perm('url:write') @Post('catalog/import-urls')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async importUrls(@CurrentUser() u: AuthUser, @UploadedFile() file: any, @Query('activate') activate?: string) {
+    if (!file) throw httpErr(400, 'Dosya yüklenmedi.', 'no_file');
+    const text = file.buffer.toString('utf8').replace(/^\uFEFF/, '');
+    const delim = (text.split('\n')[0].match(/;/g)?.length ?? 0) > (text.split('\n')[0].match(/,/g)?.length ?? 0) ? ';' : ',';
+    let raw: string[][];
+    try { raw = parseCsv(text, { delimiter: delim, relax_column_count: true, skip_empty_lines: true }); } catch (e: any) { throw httpErr(400, `CSV okunamadı: ${e.message}`, 'bad_file'); }
+    const norm = (x: string) => String(x ?? '').toLocaleLowerCase('tr-TR').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    const head = (raw[0] ?? []).map(norm);
+    const col = (names: string[]) => head.findIndex((h) => names.includes(h));
+    const cCode = col(['product_code', 'urun_kodu', 'kod', 'sku']); const cUrl = col(['seller_url', 'url', 'adres', 'satici_url']);
+    const cTitle = col(['title', 'baslik', 'rakip_urun_adi']);
+    if (cCode < 0 || cUrl < 0) throw httpErr(400, 'CSV başlıklarında "Product Code" (veya Ürün Kodu) ve "Seller URL" (veya URL) sütunları bulunmalı.', 'bad_header');
+    const own = (process.env.OWN_DOMAINS ?? 'ragyu.com.tr').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
+    const isActive = activate === '1' || activate === 'true';
+    const out = { total: raw.length - 1, created: 0, skipped: [] as { row: number; message: string }[], errors: [] as { row: number; message: string }[], sourcesCreated: [] as string[] };
+    for (let i = 1; i < raw.length; i++) {
+      const rowNo = i + 1; const r = raw[i];
+      try {
+        const code = String(r[cCode] ?? '').trim(); const rawUrl = String(r[cUrl] ?? '').trim();
+        if (!code) throw new Error('Ürün kodu boş.'); if (!rawUrl) throw new Error('URL boş.');
+        const url = checkUrl(rawUrl); const domain = hostOf(url);
+        if (own.includes(domain)) { out.skipped.push({ row: rowNo, message: `Ragyu'nun kendi sitesi (${domain}) rakip sayılmaz; atlandı.` }); continue; }
+        const v = (await this.db.query(`SELECT v.id, v.pack_qty, v.pack_unit FROM product_variants v JOIN products p ON p.id=v.product_id WHERE v.org_id=$1 AND (lower(v.sku)=lower($2) OR lower(p.code)=lower($2)) ORDER BY (lower(v.sku)=lower($2)) DESC LIMIT 2`, [u.orgId, code])).rows;
+        if (!v.length) throw new Error(`"${code}" kodlu ürün katalogda yok. Önce kataloğu içe aktarın.`);
+        const dupe = await this.db.query(`SELECT 1 FROM tracked_urls t JOIN product_links l ON l.competitor_product_id=t.competitor_product_id WHERE t.org_id=$1 AND ${NORM_URL('t.url')} = ${NORM_URL('$2::text')} AND l.variant_id=$3`, [u.orgId, url.toString(), v[0].id]);
+        if (dupe.rowCount) { out.skipped.push({ row: rowNo, message: 'Bu URL bu ürün için zaten kayıtlı.' }); continue; }
+        await tx(this.db, async (c) => {
+          let src = (await c.query(`SELECT id FROM sources WHERE org_id=$1 AND lower(domain) IN ($2,$3)`, [u.orgId, domain, 'www.' + domain])).rows[0];
+          if (!src) { src = (await c.query(`INSERT INTO sources(org_id,name,domain,adapter_key) VALUES ($1,$2,$2,'generic-html') RETURNING id`, [u.orgId, domain])).rows[0]; out.sourcesCreated.push(domain); }
+          const title = (cTitle >= 0 && String(r[cTitle] ?? '').trim()) || decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() ?? domain).replace(/[-_]+/g, ' ');
+          const cp = (await c.query(`INSERT INTO competitor_products(org_id,source_id,title,url,discovered_by) VALUES ($1,$2,$3,$4,'import') RETURNING id`, [u.orgId, src.id, title, url.toString()])).rows[0];
+          await c.query(`INSERT INTO product_links(org_id,variant_id,competitor_product_id,status,origin,note,created_by) VALUES ($1,$2,$3,'review','manual','Toplu URL içe aktarma',$4)`, [u.orgId, v[0].id, cp.id, u.id]);
+          await c.query(`INSERT INTO tracked_urls(org_id,source_id,competitor_product_id,url,origin,active,created_by) VALUES ($1,$2,$3,$4,'manual',$5,$6)`, [u.orgId, src.id, cp.id, url.toString(), isActive, u.id]);
+        });
+        out.created++;
+      } catch (e: any) { out.errors.push({ row: rowNo, message: e.message }); }
+    }
+    await auditFrom(this.db, u, 'urls.imported', 'import', undefined, { file: file.originalname, total: out.total, created: out.created, skipped: out.skipped.length, errors: out.errors.length, activated: isActive, sourcesCreated: out.sourcesCreated });
+    return out;
+  }
+
+
+  /**
+   * Rakip ürün ÖNERİLERİ içe aktarma (ör. PriceRest "product_suggestions" Excel/CSV). Her satır "önerildi" durumunda eşleşme olur;
+   * kaynak dosyadaki "Matching Score" GÜVENİLİR sayılmaz (örn. kuzu küşleme ↔ kıyma 100 puan görülmüştür): puan ve uyuşmazlıklar
+   * burada yeniden hesaplanır, eşiğin (minScore, varsayılan 0.35) altındakiler alınmaz. Hiçbiri onaylı sayılmaz; URL'ler pasif eklenir.
+   * Aynı ürün için zaten kayıtlı URL'ler (Tüm Satıcı URL'leri içe aktarmasıyla çakışanlar dahil) tekilleştirilir.
+   */
+  @Perm('match:write') @Post('catalog/import-suggestions')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }))
+  async importSuggestions(@CurrentUser() u: AuthUser, @UploadedFile() file: any, @Query('minScore') minScoreQ?: string) {
+    if (!file) throw httpErr(400, 'Dosya yüklenmedi.', 'no_file');
+    const minScore = minScoreQ ? Math.min(1, Math.max(0, Number(minScoreQ))) : 0.35;
+    let raw: any[][];
+    try {
+      if (/\.xlsx$/i.test(file.originalname)) {
+        const wb = new ExcelJS.Workbook(); await wb.xlsx.load(file.buffer as any); raw = [];
+        wb.worksheets[0].eachRow({ includeEmpty: false }, (row) => raw.push((row.values as any[]).slice(1).map((v) => (v && typeof v === 'object' && 'text' in v ? v.text : v && typeof v === 'object' && 'result' in v ? v.result : v))));
+      } else {
+        const text = file.buffer.toString('utf8').replace(/^\uFEFF/, ''); const d = (text.split('\n')[0].match(/;/g)?.length ?? 0) > (text.split('\n')[0].match(/,/g)?.length ?? 0) ? ';' : ',';
+        raw = parseCsv(text, { delimiter: d, relax_column_count: true, skip_empty_lines: true });
+      }
+    } catch (e: any) { throw httpErr(400, `Dosya okunamadı: ${e.message}`, 'bad_file'); }
+    const norm = (x: any) => String(x ?? '').toLocaleLowerCase('tr-TR').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    const head = (raw[0] ?? []).map(norm); const col = (n: string[]) => head.findIndex((h) => n.includes(h));
+    const codeCols = head.map((h: string, i: number) => (['sku', 'product_code'].includes(h) ? i : -1)).filter((i: number) => i >= 0); const cCode = codeCols[0] ?? -1; const cUrl = col(['suggestion_url']); const cName = col(['suggestion_name']); const cSite = col(['suggestion_website']);
+    if (cCode < 0 || cUrl < 0 || cName < 0) throw httpErr(400, 'Başlıklarda SKU (veya Product Code), Suggestion Name ve Suggestion URL sütunları bulunmalı.', 'bad_header');
+    const own = (process.env.OWN_DOMAINS ?? 'ragyu.com.tr').split(',').map((d) => d.trim().toLowerCase());
+    const variants = new Map<string, any>();
+    const vrows = (await this.db.query(`SELECT v.id, v.sku, v.pack_qty, v.pack_unit, p.code, p.name, p.brand, p.attrs FROM product_variants v JOIN products p ON p.id=v.product_id WHERE v.org_id=$1`, [u.orgId])).rows;
+    for (const v of vrows) { variants.set(String(v.sku).toLowerCase(), v); variants.set(String(v.code).toLowerCase(), v); }
+    const out = { total: raw.length - 1, created: 0, belowThreshold: 0, duplicates: 0, errors: [] as { row: number; message: string }[], sourcesCreated: [] as string[] };
+    for (let i = 1; i < raw.length; i++) {
+      const r = raw[i]; const rowNo = i + 1;
+      try {
+        const code = codeCols.map((ci: number) => String(r[ci] ?? '').trim()).find((x: string) => x) ?? ''; const rawUrl = String(r[cUrl] ?? '').trim(); const title = String(r[cName] ?? '').trim();
+        if (!code || !rawUrl || !title) throw new Error('Kod, öneri adı veya URL boş.');
+        const v = variants.get(code.toLowerCase()); if (!v) throw new Error(`"${code}" kodlu ürün katalogda yok.`);
+        const url = checkUrl(rawUrl); const domain = hostOf(url);
+        if (own.includes(domain)) { out.duplicates++; continue; }
+        const q = parseQtyFromText(title);
+        const sim = similarity({ title: v.name, brand: v.brand, attrs: v.attrs, packQty: v.pack_qty, packUnit: v.pack_unit }, { title, packQty: q ? String(q.qty) : null, packUnit: q?.unit ?? null });
+        // Gramaj farkı tek başına elemez (TL/kg ile kıyaslanır); ürün çelişkisi puanı düşürür.
+        if (sim.score < minScore) { out.belowThreshold++; continue; }
+        const dupe = await this.db.query(`SELECT 1 FROM tracked_urls t JOIN product_links l ON l.competitor_product_id=t.competitor_product_id WHERE t.org_id=$1 AND ${NORM_URL('t.url')} = ${NORM_URL('$2::text')} AND l.variant_id=$3`, [u.orgId, url.toString(), v.id]);
+        if (dupe.rowCount) { out.duplicates++; continue; }
+        await tx(this.db, async (c) => {
+          let src = (await c.query(`SELECT id FROM sources WHERE org_id=$1 AND lower(domain) IN ($2,$3)`, [u.orgId, domain, 'www.' + domain])).rows[0];
+          if (!src) { src = (await c.query(`INSERT INTO sources(org_id,name,domain,adapter_key) VALUES ($1,$2,$2,'generic-html') RETURNING id`, [u.orgId, domain])).rows[0]; out.sourcesCreated.push(domain); }
+          const cp = (await c.query(`INSERT INTO competitor_products(org_id,source_id,title,url,attrs,discovered_by) VALUES ($1,$2,$3,$4,$5,'import') RETURNING id`, [u.orgId, src.id, title, url.toString(), JSON.stringify(q ? { pack_qty: q.qty.toString(), pack_unit: q.unit } : {})])).rows[0];
+          await c.query(`INSERT INTO product_links(org_id,variant_id,competitor_product_id,status,origin,score,mismatches,note,created_by) VALUES ($1,$2,$3,'suggested','auto',$4,$5,'Dış öneri dosyası (puan yeniden hesaplandı)',$6) ON CONFLICT DO NOTHING`, [u.orgId, v.id, cp.id, sim.score.toFixed(3), JSON.stringify(sim.mismatches), u.id]);
+          await c.query(`INSERT INTO tracked_urls(org_id,source_id,competitor_product_id,url,origin,active,created_by) VALUES ($1,$2,$3,$4,'auto',false,$5)`, [u.orgId, src.id, cp.id, url.toString(), u.id]);
+        });
+        out.created++;
+      } catch (e: any) { out.errors.push({ row: rowNo, message: e.message }); }
+    }
+    await auditFrom(this.db, u, 'suggestions.imported', 'import', undefined, { file: file.originalname, minScore, ...out, errors: out.errors.length });
+    return out;
+  }
+
+  /** Kaynağın pasif izlenen URL'lerini etkinleştirir; ilk kontroller kaynağın istek aralığıyla kademelendirilir (ani yük yok). */
+  @Perm('source:manage') @Post('sources/:id/activate-urls')
+  async activateUrls(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    const r = await this.db.query(`WITH s AS (SELECT min_interval_ms FROM sources WHERE id=$1 AND org_id=$2),
+      t AS (SELECT t.id, row_number() OVER (ORDER BY t.created_at) rn FROM tracked_urls t WHERE t.source_id=$1 AND t.org_id=$2 AND NOT t.active)
+      UPDATE tracked_urls x SET active=true, deactivated_at=NULL, next_check_at=now() + (t.rn * (SELECT min_interval_ms FROM s) || ' milliseconds')::interval FROM t WHERE x.id=t.id RETURNING x.id`, [id, u.orgId]);
+    await auditFrom(this.db, u, 'source.urls_activated', 'source', id, { count: r.rowCount });
+    return { activated: r.rowCount };
   }
 
   // ------------------------------------------------------------ gramaj düzeltmesi

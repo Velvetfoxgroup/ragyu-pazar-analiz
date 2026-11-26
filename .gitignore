@@ -14,3 +14,4 @@ backups/
 *.dump
 *.bak
 .github/workflows/
+*.html

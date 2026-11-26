@@ -274,6 +274,54 @@ describe('Katalog içe aktarma', () => {
   });
 });
 
+describe('Toplu rakip URL içe aktarma (PriceRest CSV)', () => {
+  it('ürün koduyla eşler, kendi siteyi atlar, onaysız ve pasif ekler; hata ve tekrarları raporlar; kaynak bazında etkinleştirilir', async () => {
+    const db = getPool();
+    const csv = 'ID,Product Code,Product Name,Seller Name,Seller URL\n' +
+      'x,IMP-1-A,İçe Aktarılan Biftek,ragyu.com.tr,https://www.ragyu.com.tr/ice-aktarilan-biftek\n' +
+      'x,IMP-1-A,İçe Aktarılan Biftek,www.etineniyisi.com,https://www.etineniyisi.com/ice-aktarilan-biftek\n' +
+      'x,IMP-1-A,İçe Aktarılan Biftek,macrocenter.com.tr,https://www.macrocenter.com.tr/biftek-p-1\n' +
+      'x,IMP-1-A,İçe Aktarılan Biftek,macrocenter.com.tr,https://www.macrocenter.com.tr/biftek-p-2\n' +
+      'x,YOK-123,Olmayan,etineniyisi.com,https://www.etineniyisi.com/x\n' +
+      'x,IMP-1-A,Biftek,x,http://127.0.0.1/gizli\n';
+    const r = await editor.post('/api/catalog/import-urls').set(H).attach('file', Buffer.from(csv), 'urller.csv');
+    expect(r.status).toBe(201); expect(r.body.created).toBe(3);
+    expect(r.body.skipped[0].message).toMatch(/kendi sitesi/);
+    expect(r.body.errors.map((e: any) => e.row).sort()).toEqual([6, 7]);
+    const again = await editor.post('/api/catalog/import-urls').set(H).attach('file', Buffer.from(csv), 'urller.csv');
+    expect(again.body.created).toBe(0); expect(again.body.skipped.length).toBe(4);
+    const rows = (await db.query(`SELECT l.status, t.active, s.domain FROM tracked_urls t JOIN product_links l ON l.competitor_product_id=t.competitor_product_id JOIN sources s ON s.id=t.source_id WHERE t.url LIKE '%ice-aktarilan%' OR t.url LIKE '%biftek-p-%'`)).rows;
+    expect(rows).toHaveLength(3); expect(rows.every((x: any) => x.status === 'review' && x.active === false)).toBe(true);
+    expect(rows.map((x: any) => x.domain).sort()).toEqual(['etineniyisi.com', 'macrocenter.com.tr', 'macrocenter.com.tr']);
+    expect((await viewer.post('/api/catalog/import-urls').set(H).attach('file', Buffer.from(csv), 'u.csv')).status).toBe(403);
+    expect((await editor.post('/api/sources/' + (await db.query(`SELECT id FROM sources WHERE domain='etineniyisi.com'`)).rows[0].id + '/activate-urls').set(H)).status).toBe(403);
+    const sid = (await db.query(`SELECT id FROM sources WHERE domain='macrocenter.com.tr'`)).rows[0].id;
+    expect((await post(admin, `/api/sources/${sid}/activate-urls`)).body.activated).toBe(2);
+    const t = (await db.query(`SELECT count(*) n FROM tracked_urls WHERE source_id=$1 AND active AND next_check_at > now()`, [sid])).rows[0].n; expect(t).toBe('2'); // kademelendirilmiş
+  });
+  it('PriceRest öneri dosyası: önerildi olarak alınır, güvenilmez puan yeniden hesaplanır, çakışanlar tekilleştirilir', async () => {
+    const db = getPool();
+    const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('s');
+    ws.addRow(['Product Code', 'SKU', 'Product Name', 'Suggestion Website', 'Suggestion Name', 'Matching Score', 'Suggestion URL']);
+    ws.addRow([null, 'IMP-1-A', 'İçe Aktarılan Biftek', 'etineniyisi.com', 'Marine Kuzu Kıyma Şiş', 100, 'https://www.etineniyisi.com/kuzu-kiyma-sis']); // alakasız ama "100" puanlı
+    ws.addRow([null, 'IMP-1-A', 'İçe Aktarılan Biftek', 'tazedirekt.com', 'İçe Aktarılan Biftek 500 g', 100, 'https://www.tazedirekt.com/ice-aktarilan-biftek-500-g']);
+    ws.addRow([null, 'IMP-1-A', 'İçe Aktarılan Biftek', 'etineniyisi.com', 'İçe Aktarılan Biftek', 100, 'https://etineniyisi.com/ice-aktarilan-biftek/']); // CSV ile çakışır (www/sondaki / farkı)
+    ws.addRow([null, 'YOK-9', 'x', 'a.com', 'x y z', 100, 'https://a.com/x']);
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    const r = await editor.post('/api/catalog/import-suggestions').set(H).attach('file', buf, 'oneriler.xlsx');
+    expect(r.status).toBe(201); expect(r.body.created).toBe(1); expect(r.body.belowThreshold).toBe(1); expect(r.body.duplicates).toBe(1); expect(r.body.errors).toHaveLength(1);
+    const l = (await db.query(`SELECT l.status, l.origin, t.active FROM product_links l JOIN tracked_urls t ON t.competitor_product_id=l.competitor_product_id WHERE t.url LIKE '%tazedirekt.com/ice-aktarilan%'`)).rows[0];
+    expect(l).toEqual({ status: 'suggested', origin: 'auto', active: false });
+    expect((await viewer.post('/api/catalog/import-suggestions').set(H).attach('file', buf, 'o.xlsx')).status).toBe(403);
+  });
+  it('ürün kodu iş anahtarıdır: büyük/küçük harf ve baştaki/sondaki boşluk aynı kodu verir', async () => {
+    expect((await post(editor, '/api/products', { code: '  imp-1  ', name: 'Tekrar', variants: [{ sku: 'T-1', packQty: 1, packUnit: 'kg' }] })).status).toBe(409);
+    const r = await post(editor, '/api/products', { code: '  PRE2023-77  ', name: ' Boşluklu Ad ', variants: [{ sku: ' PRE2023-77 ', packQty: 1, packUnit: 'kg' }] });
+    expect(r.status).toBe(201);
+    const p = (await getPool().query(`SELECT code, name FROM products WHERE id=$1`, [r.body.id])).rows[0]; expect(p).toEqual({ code: 'PRE2023-77', name: 'Boşluklu Ad' });
+  });
+});
+
 describe('Denetim kayıtları', () => {
   it('onay, URL ekleme/değiştirme, gramaj düzeltmesi, kullanıcı ve rol değişiklikleri kim/ne zaman ile kaydedilir', async () => {
     const list = (await admin.get('/api/audit').query({ limit: 500 })).body;

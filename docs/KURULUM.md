@@ -63,3 +63,10 @@ Yedek dosyaları kullanıcı bilgisi (şifre özeti) içerir: şifreli diske/eri
 
 ## 10. Demo
 `docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build` ardından `docker compose exec api node_modules/.bin/tsx apps/sample-site/seed.ts`. Demo, yerel sahte rakip sitelerini tarar; geçmiş fiyat gözlemleri örnek amaçlı üretilmiştir (`raw.method = demo-backfill`). Gerçek rakip sitelerde doğrulama yapılmamıştır.
+
+## 11. Gerçek katalog ve rakip URL'lerini yükleme (önerilen sıra)
+1. **Katalog:** İçe aktar → `data/ragyu-katalog.csv` (PriceRest raporlarından: gerçek ürün kodları aynen, Ragyu paket fiyatı). Gramaj kaynağı sütunu (`gramaj_kaynagi`): ürün adında yazıyorsa o; yoksa Ragyu paket fiyatı ÷ kg fiyatı oranından **türetilmiştir** (16 satır "standart dışı, doğrulayın" etiketli, 3 satır gramajsız → `adet`, kg kıyasına girmez). Türetilmiş gramajları ürün sorumlusuna doğrulatın.
+2. **Rakip URL'leri:** İçe aktar → "Rakip URL'lerini toplu içe aktar" (PriceRest "Tüm Satıcı URL'leri" CSV). Kayıtlar *inceleme bekliyor*, URL'ler *pasif* açılır. Ragyu'nun kendi sitesi (`OWN_DOMAINS`, varsayılan ragyu.com.tr) atlanır.
+3. **Öneriler (isteğe bağlı):** "Rakip ürün önerilerini içe aktar" (PriceRest product_suggestions). Dosyadaki puana güvenilmez, yeniden hesaplanır; zayıflar alınmaz; hepsi *önerildi*.
+4. **Adaptör doğrulama:** Şirket sunucusundan `npm run adapter:test -- <rakip ürün URL'si>` ile tek istekle ayrıştırmayı deneyin (veritabanına yazmaz). Fiyat bulunamazsa kaynak için `config.selectors` tanımlayın (Kaynaklar sayfası / API).
+5. **Etkinleştirme:** Kaynaklar → "N pasif URL'yi etkinleştir" (kaynak bazında; ilk kontroller kaynağın istek aralığıyla kademelendirilir). Eşleşmeleri onay yetkilisi Eşleşmeler sayfasından onaylar; onaysızlar kıyasa girmez.
