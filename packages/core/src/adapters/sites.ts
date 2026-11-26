@@ -105,22 +105,34 @@ export const organikasapAdapter: SourceAdapter = {
 
 // ───────────────────────── Migros grubu (Tazedirekt / Macroonline / Migros) ─────────────────────────
 /**
- * Bu üç site aynı Angular altyapısını kullanır; fiyat sayfa HTML'inde değil, tarayıcıda sonradan yüklenir.
- * Sunucu çıktısında yalnızca og:price:amount meta etiketi bulunur (Türkçe biçim: "1.026,87"). Sayfadaki diğer TL
- * değerleri "benzer ürünler" kartlarıdır ve KULLANILMAZ. Fiyat yüklenmemişse meta "null" olur → fiyat yok.
+ * Bu üç site aynı Angular altyapısını kullanır; görünen fiyat ve "Sepete Ekle" düğmesi tarayıcıda sonradan çizilir.
+ * Güvenilir kaynak: sayfadaki JSON-LD (WebPage → mainEntity.offers.itemOffered → Product.offers: fiyat + availability);
+ * yedek: og:price:amount meta (Türkçe biçim "1.026,87"). Sayfadaki diğer TL değerleri "benzer ürünler" kartlarıdır ve
+ * KULLANILMAZ. Stok bilgisi JSON-LD'de yoksa null (bilinmiyor) kalır.
  * Gramaj başlıktan alınır ("630 g"); başlık "… Kg" ile bitiyorsa ürün kilo ile satılır, fiyat 1 kg içindir.
  */
 function migrosGroupExtract(key: string): SourceAdapter['extract'] {
+  /** WebPage → mainEntity.offers.itemOffered[Product].offers: sayfanın kendi ürününün fiyatı ve stok durumu (SEO verisi). */
+  const findOffered = ($: cheerio.CheerioAPI) => {
+    for (const n of jsonLdNodes($)) {
+      const items = n?.mainEntity?.offers?.itemOffered;
+      for (const it of Array.isArray(items) ? items : items ? [items] : []) if (isType(it, 'Product') && firstOffer(it)?.price !== undefined) return it;
+    }
+    return null;
+  };
   return (html) => {
     const $ = cheerio.load(html);
     const h1 = txt($('h1').first().text());
-    const title = h1 ?? txt($('meta[property="og:title"]').attr('content'));
-    const price = dec($('meta[property="og:price:amount"]').attr('content'));
+    const prod = findOffered($);
+    const offer = firstOffer(prod);
+    const title = h1 ?? txt(prod?.name) ?? txt($('meta[property="og:title"]').attr('content'));
+    const price = dec(offer?.price, true) ?? dec($('meta[property="og:price:amount"]').attr('content'));
     const titleClean = (title ?? '').replace(/\s*[|–-]\s*(Tazedirekt|Macroonline|Migros)\s*$/i, '');
     const perKg = /(^|\s)kg\.?\s*$/i.test(titleClean) && !parseQtyFromText(titleClean);
-    const brand = txt($('fe-product-brand a, a#product-detail-brand-name').first().text());
-    return merge(`${key}:og-meta`, {
-      title: titleClean || null, brand, salePrice: price, currency: price ? 'TRY' : null, inStock: null,
+    const brand = txt(prod?.brand?.name) ?? txt($('fe-product-brand a, a#product-detail-brand-name').first().text());
+    return merge(`${key}:${offer ? 'json-ld' : 'og-meta'}`, {
+      title: titleClean || null, brand, salePrice: price, currency: price ? 'TRY' : null,
+      inStock: offer?.availability ? stockFromSchema(offer.availability) : null, // sayfada yoksa bilinmiyor (null)
     }, perKg ? { packQty: '1', packUnit: 'kg' as const } : qtyPart(titleClean));
   };
 }

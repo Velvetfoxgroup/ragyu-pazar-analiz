@@ -54,20 +54,26 @@ describe('site adaptörleri (kayıtlı sayfa örnekleri)', () => {
 
   it('tazedirekt: og:price Türkçe biçimli (1.026,87), gramaj başlıktan (630 g), URL’deki "500-g" yok sayılır', () => {
     const e = run('tazedirekt', 'tazedirekt');
-    expect(e.salePrice).toBe('1026.87'); expect(e.packQty).toBe('630'); expect(e.packUnit).toBe('g');
+    expect(e.salePrice).toBe('1026.87'); expect(e.inStock).toBe(true); expect(e.packQty).toBe('630'); expect(e.packUnit).toBe('g');
     expect(perKg(e)).toBe('1629.95');
   });
 
   it('macrocenter: "… Kg" ürünü, fiyat 1 kg için (benzer ürün kartları kullanılmaz)', () => {
     const e = run('macrocenter', 'macrocenter');
     expect(e.title).toBe('Kuzu But Kemiksiz Trakya Kıvırcık Kg');
-    expect(e.salePrice).toBe('2069.95'); expect(e.packQty).toBe('1'); expect(e.packUnit).toBe('kg');
+    expect(e.salePrice).toBe('2069.95'); expect(e.inStock).toBe(true); expect(e.packQty).toBe('1'); expect(e.packUnit).toBe('kg');
   });
 
-  it('migros: fiyat sayfada yüklenmemiş (meta "null") → fiyat yok, uydurma yok', () => {
+  it('migros: JSON-LD teklifinden 899,95 TL/kg ve stok (meta etiketi "null" olsa da)', () => {
     const e = run('migros', 'migros');
     expect(e.title).toBe('Dana Kuyruk (Pöç) Kg');
-    expect(e.salePrice).toBeNull();
+    expect(e.salePrice).toBe('899.95'); expect(e.packQty).toBe('1'); expect(e.packUnit).toBe('kg'); expect(e.inStock).toBe(true);
+  });
+
+  it('migros grubu: JSON-LD yoksa og:price yedeği; stok bilinmiyor (null), uydurma yok', () => {
+    const html = load('tazedirekt').replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g, '');
+    const e = getAdapter('tazedirekt').extract(html, {});
+    expect(e.salePrice).toBe('1026.87'); expect(e.inStock).toBeNull();
   });
 
   it('fumeci: microdata fiyatı ve kg birimi (2 sayfa)', () => {

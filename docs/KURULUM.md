@@ -82,8 +82,8 @@ geliştirme ortamından gerçek sitelere erişilemediği için **canlı sitede �
 | etineniyisi.com | `etineniyisi` | Gramaj sepet kutusundaki birim etiketinden ("400 gr"); etiket yoksa gramaj bilinmiyor sayılır |
 | nebyandogal.com | `nebyandogal` | Fiyat sayfada "100 g" için yazılır; adaptör bunu paket miktarı olarak okur |
 | organikasap.com | `organikasap` | Seçili varyantı sepet formundan okur; seçilemezse fiyat vermez |
-| tazedirekt.com, macrocenter.com.tr | `tazedirekt`, `macrocenter` | Fiyat yalnızca `og:price:amount` meta etiketinden (sayfa istemcide yüklendiği için); gramaj başlıktan |
-| migros.com.tr | `migros` | Kaydedilen sayfada fiyat yok → sunucu çıktısından fiyat alınamayabilir; kullanmayın |
+| tazedirekt.com, macrocenter.com.tr | `tazedirekt`, `macrocenter` | Fiyat ve stok sayfadaki JSON-LD teklifinden, yedek olarak `og:price:amount`; gramaj başlıktan. Stok verisi yoksa "bilinmiyor" |
+| migros.com.tr | `migros` | Aynı yapı; kaydedilen sayfada JSON-LD fiyatı var. Canlıda denenmedi |
 | fumeci.com | `fumeci` | IdeaSoft microdata; birim ana ürün miktar kutusundan (kg) |
 | dilekgurme.net | `dilekgurme` | KDV dahil fiyat (JSON-LD) |
 | market.amasyaeturunleri.com.tr | `amasya` | Gramaj ürün adından ("500g") |
