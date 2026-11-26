@@ -1,0 +1,48 @@
+# Canlı (şirket sunucusu) kurulumu. Yalnızca "proxy" servisi dışarıya (80/443) açılır;
+# PostgreSQL ve Redis iç ağdadır, internete/host'a port yayınlanmaz.
+name: ragyu-pazar
+x-app: &app
+  build: { context: ., args: { API_URL: "http://api:4000" } }
+  restart: unless-stopped
+  env_file: .env
+  depends_on: { db: { condition: service_healthy }, redis: { condition: service_healthy } }
+  networks: [internal]
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment: { POSTGRES_USER: ragyu, POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD .env içinde tanımlı olmalı}", POSTGRES_DB: ragyu }
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ragyu -d ragyu"], interval: 5s, timeout: 3s, retries: 20 }
+    networks: [internal]
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD .env içinde tanımlı olmalı}"]
+    volumes: [redisdata:/data]
+    healthcheck: { test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"], interval: 5s, timeout: 3s, retries: 20 }
+    environment: { REDIS_PASSWORD: "${REDIS_PASSWORD}" }
+    networks: [internal]
+  api:
+    <<: *app
+    command: ["node", "apps/api/dist/main.js"]
+    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], interval: 15s, timeout: 5s, retries: 5 }
+  worker:   # API'den bağımsız; ayrı yeniden başlatılabilir: docker compose restart worker
+    <<: *app
+    command: ["node", "apps/worker/dist/main.js"]
+    environment: { AUTO_MIGRATE: "false" }
+    depends_on: { api: { condition: service_healthy } }
+  web:
+    <<: *app
+    command: ["npm", "run", "start", "-w", "@ragyu/web"]
+    depends_on: [api]
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes: [./deploy/Caddyfile:/etc/caddy/Caddyfile:ro, caddy_data:/data, caddy_config:/config]
+    environment: { APP_DOMAIN: "${APP_DOMAIN:?APP_DOMAIN .env içinde tanımlı olmalı}", ALLOWED_CIDRS: "${ALLOWED_CIDRS:-0.0.0.0/0 ::/0}", TLS_MODE: "${TLS_MODE:-}" }
+    depends_on: [web, api]
+    networks: [internal, edge]
+volumes: { pgdata: {}, redisdata: {}, caddy_data: {}, caddy_config: {} }
+networks: { internal: { internal: false }, edge: {} }

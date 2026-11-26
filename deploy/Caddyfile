@@ -1,0 +1,12 @@
+# HTTPS: APP_DOMAIN genel bir alan adıysa Let's Encrypt sertifikasını Caddy otomatik alır.
+# Şirket içi alan adı için .env içinde TLS_MODE="tls internal" (Caddy iç CA) veya kendi sertifikanız için aşağıdaki satırı değiştirin.
+{$APP_DOMAIN} {
+	{$TLS_MODE}
+	# Erişim sınırı: yalnızca ALLOWED_CIDRS (şirket ağı / VPN çıkış adresleri). Varsayılan herkese açık; canlıda mutlaka daraltın.
+	@blocked not remote_ip {$ALLOWED_CIDRS}
+	respond @blocked "Erişim izniniz yok." 403
+	encode zstd gzip
+	header { Strict-Transport-Security "max-age=31536000"; X-Content-Type-Options nosniff; -Server }
+	handle /api/* { reverse_proxy api:4000 }
+	handle { reverse_proxy web:3000 }
+}

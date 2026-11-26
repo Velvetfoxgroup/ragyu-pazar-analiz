@@ -1,0 +1,13 @@
+# Yerel DEMO: örnek veriler + yerel "sahte rakip" sitesi. Gerçek rakip değildir.
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+# Demo sitesi dahili adreslere gittiği için SCRAPER_ALLOW_HOSTS ile yalnızca bu 3 ad izinlidir (canlıda boş bırakın).
+x-demo-env: &demo-env
+  SCRAPER_ALLOW_HOSTS: "ornek-et.demo,demo-kasap.demo,lezzet.demo,ornek-et.demo:4100,demo-kasap.demo:4100,lezzet.demo:4100"
+services:
+  api: { environment: *demo-env }
+  worker: { environment: { <<: *demo-env, AUTO_MIGRATE: "false" } }
+  sample-site:
+    build: { context: . }
+    command: ["node_modules/.bin/tsx", "apps/sample-site/server.ts"]
+    restart: unless-stopped
+    networks: { internal: { aliases: [ornek-et.demo, demo-kasap.demo, lezzet.demo] } }
