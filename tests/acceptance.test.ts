@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import http from 'node:http';
 import request from 'supertest';
 import ExcelJS from 'exceljs';
-import { getPool, closePool, migrate, runCheck, claimDue, comparison, periodChange, worklist } from '@ragyu/core';
+import { getPool, closePool, migrate, runCheck, claimDue, refreshStaleAlerts, comparison, periodChange, worklist } from '@ragyu/core';
 import { createApp } from '../apps/api/src/bootstrap';
 
 const H = { 'X-Requested-With': 'ragyu' };
@@ -353,5 +353,59 @@ describe('Denetim kayıtları', () => {
     expect((await editor.get(`/api/products/${p2}`)).status).toBe(404);
     expect((await editor.get('/api/products').query({ pageSize: 200 })).body.rows.some((r: any) => r.productId === p2)).toBe(false);
     expect((await patch(editor, `/api/products/${p2}`, { name: 'ele geçirildi' })).status).toBe(404);
+  });
+});
+
+describe('Gerçek site adaptörleri uçtan uca (kayıtlı sayfalarla; canlı ağ yok)', () => {
+  const fx = (n: string) => require('node:fs').readFileSync(require('node:path').join(__dirname, 'fixtures', `${n}.htm`), 'utf8');
+  const bodies: Record<string, string> = { 'etineniyisi.com': fx('etineniyisi'), 'amasyaeturunleri.com.tr': fx('amasya'), 'macrocenter.com.tr': fx('macrocenter') };
+  let failing = false;
+  const fetcher = async (url: string) => {
+    const host = new URL(url).hostname.replace(/^(www|market)\./, '');
+    if (failing) return { status: 503, body: 'bakımda', finalUrl: url, contentType: 'text/html' };
+    return { status: 200, body: bodies[host] ?? '', finalUrl: url, contentType: 'text/html' };
+  };
+
+  it('CSV ile gelen URL’ler kendi adaptörleriyle kaynak olur; planlı taramada gözlemler doğru TL/kg ile yazılır', async () => {
+    const db = getPool(); const orgId = (await db.query('SELECT org_id FROM users LIMIT 1')).rows[0].org_id;
+    const pr = await post(editor, '/api/products', { code: 'E2E-1', name: 'Kuzu Test Ürünü', variants: [{ sku: 'E2E-1', packQty: 1, packUnit: 'kg', price: 2000 }] }); expect(pr.status).toBe(201);
+    const vId = (await db.query(`SELECT id FROM product_variants WHERE sku='E2E-1'`)).rows[0].id;
+    const csv = 'ID,Product Code,Product Name,Seller Name,Seller URL\n' +
+      'x,E2E-1,T,etineniyisi.com,https://www.etineniyisi.com/marine-kuzu-kusleme-sis\n' +
+      'x,E2E-1,T,amasya,https://market.amasyaeturunleri.com.tr/urun/dana-straganof-500g/\n' +
+      'x,E2E-1,T,macrocenter.com.tr,https://www.macrocenter.com.tr/kuzu-but-kemiksiz-trakya-kivircik-kg-p-16e5e62\n';
+    expect((await editor.post('/api/catalog/import-urls').set(H).attach('file', Buffer.from(csv), 'u.csv')).body.created).toBe(3);
+    const keys = (await db.query(`SELECT domain, adapter_key FROM sources WHERE domain IN ('etineniyisi.com','market.amasyaeturunleri.com.tr','macrocenter.com.tr') ORDER BY domain`)).rows;
+    expect(Object.fromEntries(keys.map((k: any) => [k.domain, k.adapter_key]))).toEqual({ 'etineniyisi.com': 'etineniyisi', 'market.amasyaeturunleri.com.tr': 'amasya', 'macrocenter.com.tr': 'macrocenter' });
+    // eşleşmeleri onayla, kaynakları etkinleştir, hepsini vadesi gelmiş yap
+    for (const l of (await db.query(`SELECT l.id FROM product_links l JOIN tracked_urls t ON t.competitor_product_id=l.competitor_product_id JOIN sources s ON s.id=t.source_id WHERE s.domain IN ('etineniyisi.com','market.amasyaeturunleri.com.tr') AND t.url LIKE '%kusleme-sis%' OR t.url LIKE '%straganof%' OR t.url LIKE '%kivircik%'`)).rows) await post(approver, `/api/links/${l.id}/status`, { status: 'approved' });
+    for (const s of (await db.query(`SELECT id FROM sources WHERE domain IN ('etineniyisi.com','market.amasyaeturunleri.com.tr','macrocenter.com.tr')`)).rows) await post(admin, `/api/sources/${s.id}/activate-urls`);
+    await db.query(`UPDATE tracked_urls SET next_check_at=now() - interval '1 minute' WHERE url LIKE '%kusleme-sis%' OR url LIKE '%straganof%' OR url LIKE '%kivircik%'`);
+    const due = (await claimDue(db, 100)).map((d) => d.id);
+    const mine = (await db.query(`SELECT id, url FROM tracked_urls WHERE url LIKE '%kusleme-sis%' OR url LIKE '%straganof%' OR url LIKE '%kivircik%'`)).rows;
+    for (const m of mine) expect(due).toContain(m.id);
+    const res: Record<string, any> = {};
+    for (const m of mine) res[new URL(m.url).hostname] = await runCheck(db, m.id, { trigger: 'scheduled', fetcher, skipRateWait: true });
+    expect(res['www.etineniyisi.com'].status).toBe('ok'); expect(res['www.etineniyisi.com'].unitPrice.value).toBe('2762.5'); // 1.105 TL / 400 g
+    expect(res['market.amasyaeturunleri.com.tr'].status).toBe('ok'); expect(res['market.amasyaeturunleri.com.tr'].unitPrice.value).toBe('1298'); // 649 TL / 500 g
+    expect(res['www.macrocenter.com.tr'].status).toBe('ok'); expect(res['www.macrocenter.com.tr'].unitPrice.value).toBe('2069.95'); // kg ürünü
+    const rep = await comparison(db, orgId, { variantId: vId });
+    expect(rep.rows[0].offers.filter((o) => o.eligible)).toHaveLength(3);
+    expect(rep.rows[0].stats.min).toBe('1298');
+  });
+
+  it('site hata verince son başarılı veri korunur, hata görünür, deneme aralığı uzar; kaynak bayatlayınca uyarı çıkar', async () => {
+    const db = getPool(); failing = true;
+    const t = (await db.query(`SELECT id FROM tracked_urls WHERE url LIKE '%straganof%'`)).rows[0];
+    const before = (await db.query('SELECT count(*) n FROM price_observations WHERE tracked_url_id=$1', [t.id])).rows[0].n;
+    const r = await runCheck(db, t.id, { trigger: 'scheduled', fetcher, skipRateWait: true });
+    expect(r.status).toBe('error'); expect(r.error).toMatch(/503|HTTP/);
+    const row = (await db.query('SELECT last_status, consecutive_failures, last_success_at, next_check_at FROM tracked_urls WHERE id=$1', [t.id])).rows[0];
+    expect(row.last_status).toBe('error'); expect(row.consecutive_failures).toBe(1); expect(row.last_success_at).not.toBeNull(); expect(new Date(row.next_check_at).getTime()).toBeGreaterThan(Date.now());
+    expect((await db.query('SELECT count(*) n FROM price_observations WHERE tracked_url_id=$1', [t.id])).rows[0].n).toBe(before); // hata yeni fiyat gibi yazılmaz
+    await db.query(`UPDATE sources SET last_success_at = now() - interval '5 days', stale_after_hours = 24 WHERE domain='market.amasyaeturunleri.com.tr'`);
+    await refreshStaleAlerts(db);
+    const a = (await db.query(`SELECT count(*) n FROM alerts a JOIN sources s ON s.id=a.ref_id WHERE a.type='stale_source' AND s.domain='market.amasyaeturunleri.com.tr' AND a.status='open'`)).rows[0].n;
+    expect(Number(a)).toBeGreaterThan(0); failing = false;
   });
 });

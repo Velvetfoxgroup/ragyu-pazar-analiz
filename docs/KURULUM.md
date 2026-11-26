@@ -1,6 +1,6 @@
 # Sunucu kurulumu
 
-> Durum notu: Docker Compose dosyaları sözdizimi olarak doğrulandı (`docker compose config`), ancak geliştirme ortamında Docker daemon olmadığından imajlar **derlenip çalıştırılmadı**. Uygulama bileşenleri (API, işçi, web, PostgreSQL, Redis) Docker dışında çalıştırılarak uçtan uca doğrulandı. İlk kurulumda `docker compose up --build` çıktısını kontrol edin.
+> Durum notu: Docker Compose dosyalarının YAML sözdizimi okundu, ancak `docker compose config` çalıştırılamadı ve geliştirme ortamında Docker daemon olmadığından imajlar **derlenip çalıştırılmadı**. Uygulama bileşenleri (API, işçi, web, PostgreSQL, Redis) Docker dışında çalıştırılarak uçtan uca doğrulandı. İlk kurulumda `docker compose up --build` çıktısını kontrol edin.
 
 ## 1. Gereksinimler
 Linux sunucu, Docker Engine + Compose eklentisi, en az 2 GB RAM, bir alan adı (DNS kaydı sunucuya işaret etmeli).
@@ -95,3 +95,20 @@ geliştirme ortamından gerçek sitelere erişilemediği için **canlı sitede �
 2. Kaynaklar sayfasında **Site adaptörlerini ata** düğmesi (veya URL içe aktarımı sırasında otomatik) kaynağa adaptörü bağlar.
 3. Ancak ondan sonra kaynağın pasif URL'lerini etkinleştirin (ilk kontroller kademeli başlar).
 4. Bir sitenin şablonu değişirse adaptör fiyatı bulamaz; sayfa "geçersiz" olur ve Kaynaklar'da hata olarak görünür — yanlış fiyat yazılmaz.
+
+
+## 13. Sunucuda yapılması gereken doğrulama (Docker imajları burada denenemedi)
+
+Geliştirme ortamında Docker daemon yoktu: imajlar derlenmedi, Compose ile ayağa kaldırılmadı, Caddy/HTTPS ve yedek/geri yükleme betikleri gerçek sunucuda çalıştırılmadı. Uygulama kodu (API, işçi, web), PostgreSQL ile birlikte Docker dışında test edildi: 66 otomatik test, `npm audit` 0 açık, web üretim derlemesi ve `next start`. Sunucuda sırayla:
+
+1. `docker compose config` hatasız çıkmalı (`.env` değişkenleri eksikse hangisinin eksik olduğunu söyler).
+2. `docker compose up -d --build` — derleme hatasız bitmeli; `docker compose ps` çıktısında api "healthy" olmalı.
+3. `./deploy/dogrula.sh https://APP_DOMAIN` — servisler, DB/Redis'in dışarıya kapalı olduğu, `.env` izinleri, HTTPS, oturumsuz API reddi ve yedek alma kontrolü. Tüm satırlar [OK] olmalı.
+4. HTTPS: tarayıcıda alan adı açılıyor ve sertifika geçerli mi? (Genel alan adı: Let's Encrypt için 80/443 internetten erişilebilir olmalı. Şirket içi: `TLS_MODE=tls internal` ve kök sertifikayı güvenilir yapın.)
+5. İlk yönetici: bölüm 5. Sonra bir çalışan hesabı açıp giriş yapın; çıkış yapın.
+6. **Yedek geri yükleme denemesi** (veri yokken yapın): `./deploy/backup.sh /srv/yedekler`, bir ürün ekleyin, `./deploy/restore.sh <dosya>`; eklediğiniz ürün kaybolmalı (yedeğin alındığı ana dönülmüş demektir). Betikler bu ortamda yalnızca `bash -n` ile sözdizimi açısından denendi.
+7. Bölüm 11 sırasıyla gerçek kataloğu ve URL'leri yükleyin, bölüm 12'deki gibi adaptörleri atayın, kaynakları tek tek etkinleştirin.
+8. 24 saat sonra: Kaynaklar sayfasında her kaynağın "Son başarılı kontrol" zamanı güncel, "Hatalı" sayısı 0 veya anlaşılır nedenli olmalı; Günlük sayfasında bayat veri uyarısı olmamalı.
+9. Sunucu yeniden başlatıldığında (`reboot`) tüm servisler kendiliğinden kalkmalı (`restart: unless-stopped`).
+
+Bir adım başarısız olursa çıktıyı (`docker compose logs --tail=100 <servis>`) paylaşın.
