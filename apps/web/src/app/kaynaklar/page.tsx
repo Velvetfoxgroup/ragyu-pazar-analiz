@@ -1,0 +1,25 @@
+'use client';
+import { useState } from 'react';
+import { api } from '@/lib/api';
+import { Shell, useLoad, Err, Loading, FreshBadge, RunBadge, Modal, Field, Tabs, useMe, can } from '@/components/ui';
+import { ago, dt } from '@/lib/format';
+
+function Inner() {
+  const me = useMe(); const { data, error, loading, reload } = useLoad(() => api<any>('/sources'), []); const runs = useLoad(() => api<any[]>('/runs', { query: { status: 'error' } }), []);
+  const [tab, setTab] = useState('sources'); const [add, setAdd] = useState(false); const [f, setF] = useState({ name: '', domain: '', adapterKey: 'generic-html', checkIntervalMinutes: 360 }); const [err, setErr] = useState<string | null>(null);
+  return <>
+    <Tabs value={tab} onChange={setTab} tabs={[['sources', 'Kaynaklar'], ['failed', `Başarısız işler${runs.data ? ` (${runs.data.length})` : ''}`]]} />
+    <Err msg={error} /><Loading on={loading && !data} />
+    {tab === 'sources' && data && <div className="card tw">{can(me, 'source:manage') && <div className="row" style={{ marginBottom: 10 }}><button className="btn pri" onClick={() => setAdd(true)}>+ Kaynak ekle</button></div>}
+      <table><thead><tr><th>Kaynak</th><th>Adaptör</th><th>Veri durumu</th><th>Son deneme</th><th>Son başarılı kontrol</th><th className="r">İzlenen URL</th><th className="r">Hatalı</th><th>Aralık</th><th></th></tr></thead><tbody>
+        {data.sources.map((s: any) => <tr key={s.id}><td><b>{s.name}</b><div className="sub">{s.domain}</div></td><td className="mono">{s.adapter_key}</td><td><FreshBadge s={s.freshness} /><div className="sub">{s.stale_after_hours} sa sonra eskir</div></td><td>{ago(s.last_attempt_at)}</td><td>{ago(s.last_success_at)}</td><td className="r">{s.active_urls}</td><td className="r">{s.failing_urls ? <span className="badge b-bad">{s.failing_urls}</span> : 0}</td><td>{s.check_interval_minutes} dk</td>
+          <td>{can(me, 'source:manage') && <button className="btn sm" onClick={async () => { await api(`/sources/${s.id}`, { method: 'PATCH', body: { active: !s.active } }); reload(); }}>{s.active ? 'Durdur' : 'Başlat'}</button>}</td></tr>)}
+        {data.sources.length === 0 && <tr><td colSpan={9} className="muted">Kaynak yok. Gerçek rakip siteleri eklemek için kaynak tanımlayın veya ürüne URL ekleyin (kaynak otomatik oluşur).</td></tr>}</tbody></table></div>}
+    {tab === 'failed' && <div className="card tw"><table><thead><tr><th>Zaman</th><th>Kaynak / ürün</th><th>Durum</th><th>Hata</th><th>Tetikleyen</th></tr></thead><tbody>{(runs.data ?? []).map((r: any) => <tr key={r.id}><td className="nowrap">{dt(r.started_at)}</td><td>{r.source_name}<div className="sub">{r.title}</div></td><td><RunBadge s={r.status} /></td><td style={{ color: 'var(--bad)' }}>{r.error}</td><td>{r.trigger === 'manual' ? 'elle' : 'planlı'}</td></tr>)}{runs.data?.length === 0 && <tr><td colSpan={5} className="muted">Başarısız iş yok.</td></tr>}</tbody></table></div>}
+    {add && <Modal title="Kaynak ekle" onClose={() => setAdd(false)}><Err msg={err} /><form onSubmit={async (e) => { e.preventDefault(); try { await api('/sources', { method: 'POST', body: f }); setAdd(false); reload(); } catch (x: any) { setErr(x.message); } }}>
+      <Field label="Ad"><input style={{ width: '100%' }} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></Field><Field label="Alan adı (örn. rakip.com)"><input style={{ width: '100%' }} value={f.domain} onChange={(e) => setF({ ...f, domain: e.target.value })} required /></Field>
+      <Field label="Adaptör"><select value={f.adapterKey} onChange={(e) => setF({ ...f, adapterKey: e.target.value })}>{data?.adapters.map((a: any) => <option key={a.key} value={a.key}>{a.label}</option>)}</select></Field>
+      <Field label="Kontrol aralığı (dk)"><input type="number" min={5} value={f.checkIntervalMinutes} onChange={(e) => setF({ ...f, checkIntervalMinutes: Number(e.target.value) })} /></Field><button className="btn pri">Kaydet</button></form></Modal>}
+  </>;
+}
+export default function Page() { return <Shell title="Kaynaklar ve veri toplama" sub="Her kaynağın son deneme, son başarılı kontrol ve güncellik durumu"><Inner /></Shell>; }

@@ -1,0 +1,16 @@
+node_modules
+dist
+.next
+.env
+.env.*
+!.env.example
+*.log
+backups/
+*.xlsx
+*.xls
+*.png
+*.jpg
+*.jpeg
+*.dump
+*.bak
+.github/workflows/
